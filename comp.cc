@@ -16,7 +16,7 @@ typedef vector<string> VS;
 typedef istringstream ISS;
 typedef ostringstream OSS;
 
-const int SCALE=18;
+const int SCALE=16;
 const int HEADER=11;
 const int HEADER_OFFSET= 1<<(HEADER-1);
 
@@ -234,7 +234,7 @@ public:
         dst += L;
 
         struct Bits bits(dst);
-        int smooth = X*Y*L/2 * 0.18;
+        int smooth = X*Y*L/2 * 0.20;
         REP(x, X*Y) {
             if (1) {
                 REP(j, L) tmp[j] = (src[j] - avg[j] + (src[j] > avg[j] ? SCALE/2 : -SCALE/2)) / SCALE;
@@ -242,10 +242,12 @@ public:
                 for(int j=L-1;j>0;j--) tmp[j] = tmp[j] - tmp[j-1];
       //          cout << "rdiff " << x << " " ; REP(i, L) cout << tmp[i] << " "; cout << endl;
                 // smooth
-                FOR(i, 1, L) if (smooth > 0 && tmp[i-1] + tmp[i]==0 && tmp[i-1]*tmp[i]== -1) {
-                    tmp[i-1] = 0;
-                    tmp[i] = 0;
-                    smooth --;
+                if (smooth > 0) {
+                    FOR(i, 1, L) if (tmp[i-1] + tmp[i]==0 && tmp[i-1]*tmp[i]== -1) {
+                        tmp[i-1] = 0;
+                        tmp[i] = 0;
+                        smooth --;
+                    }
                 }
                 // encoding
                 bits.write(tmp[0] + HEADER_OFFSET, HEADER);
@@ -388,7 +390,8 @@ int main(int argc, char **argv) {
         double ratio = double(SZ(odata))/SZ(result);
         double t = float(clock() - start)/CLOCKS_PER_SEC;
 
-        float diff = 0, diffv = 0;
+        int diff = 0;
+        uint64_t diffv = 0;
         short *src = &buffer[3], *dst = ((short*)&odata[0]) + 3;
         int N = X*Y*L;
         REP(j, N) {
@@ -396,7 +399,7 @@ int main(int argc, char **argv) {
             if (dst[j] < 0 || dst[j] > 16383) {
                 cout << j << " overflow " << dst[j] << endl;
             }
-            if (abs(d) >30) {
+            if (abs(d) >50) {
                 cout << j << " " << d << " " << src[j] << " " << dst[j] << endl;
             }
             diff += d;
