@@ -61,15 +61,24 @@ Symbol enc_table[4] = {
 };
 
 Symbol dec_table[8] = {
-    {0, 1},  // 0
-    {0, 1},
-    {0, 1},
-    {0, 1},
-    {-1, 2}, // -1
-    {-1, 2},
+    {0, 1}, {0, 1},{0, 1},{0, 1},  // 0
+    {-1, 2}, {-1, 2}, // -1
     {1, 3},  // 1
     {2, 4},  // xxx
 };
+
+
+Symbol enc_table2[9] = {
+    {0xf, 4}, {0xb, 4}, {0xa, 4}, // -1
+    {0x4, 3}, {0x0, 1}, {0xc, 4}, // 0
+    {0xd, 4}, {0xe, 4}, {0xf, 4}, // 1
+};
+
+Symbol dec_table2[16] = {
+    {0x11, 1},{0x11, 1},{0x11, 1}, {0x11, 1}, {0x11, 1}, {0x11, 1}, {0x11, 1}, {0x11, 1},
+    {0x10, 3},{0x10, 3},{0x02, 4}, {0x01, 4}, {0x12, 4}, {0x20, 4}, {0x21, 4}, {0x00, 6},
+};
+
 
 struct Bits {
     int data;
@@ -126,18 +135,33 @@ struct Bits {
 
 class DATCompression2 {
 public:
+    inline void write_byte(int d, Bits &bits, int base) {
+        bits.write(d > 0 ? 1 : 0, 1);
+        d = abs(d) - base;
+        while (d > 0) {
+            bits.write(1, 1);
+            d --;
+        }
+        bits.write(0, 1);
+    }
+
+    inline int read_byte(Bits &bits, int base) {
+        int flag = bits.read_bit();
+        int r = base;
+        int n = bits.read_bit();
+        while (n) {
+            r ++;
+            n = bits.read_bit();
+        }
+        return flag ? r : -r;
+    }
+    
     inline void encode_byte(int d, Bits &bits) {
         if (d >= -1 && d <= 1) {
             bits.write(enc_table[d+1].code, enc_table[d+1].len);
         } else {
             bits.write(enc_table[3].code, enc_table[3].len);
-            bits.write(d > 0 ? 1 : 0, 1);
-            d = abs(d) - 2;
-            while (d > 0) {
-                bits.write(1, 1);
-                d --;
-            }
-            bits.write(0, 1);
+            write_byte(d, bits, 2);
         }
     }
 
@@ -148,14 +172,35 @@ public:
             return dec_table[d].code;
         } else{
             bits.shift(3);
-            int flag = bits.read_bit();
-            int r = 2;
-            int n = bits.read_bit();
-            while (n) {
-                r ++;
-                n = bits.read_bit();
-            }
-            return flag ? r : -r;
+            return read_byte(bits, 2);
+        }
+    }
+
+    inline void encode_two_byte(int d1, int d2, Bits &bits) {
+        //int m = (d1+1) | (d2+1);
+        if (d1 < -1 || d1 > 1 || d2 < -1 || d2 > 1
+            || d1==-1 && d2==-1 || d1==1 && d2==1) {
+            bits.write(0xf, 4);
+            write_byte(d1, bits, 0);
+            write_byte(d2, bits, 0);
+        } else {
+            int index = (d1+1)*3 + d2+1;
+  //          cout << index << " " << enc_table2[index].code << endl;
+            bits.write(enc_table2[index].code, enc_table2[index].len);
+        }
+    }
+
+    inline void decode_two_byte(int &d1, int &d2, Bits &bits) {
+        int d = bits.peek(4);
+        if (dec_table2[d].len <= 4) {
+            bits.shift(dec_table2[d].len);
+//            cout << d << " " << dec_table2[d].code << endl;
+            d1 = (dec_table2[d].code >> 4) - 1;
+            d2 = (dec_table2[d].code & 0xf) - 1;
+        } else {
+            bits.shift(4);
+            d1 = read_byte(bits, 0);
+            d2 = read_byte(bits, 0);
         }
     }
 
@@ -165,14 +210,15 @@ public:
         //cout << X << Y << L << " " << SZ(dat) << endl;
         src += 3;
         int avg[60] = {0}, N=X*Y, c=0;
-        if (N>1000) N = 1000;
+        if (N>10000) N = 10000;
+        int step = X*Y/N;
         REP(i, L) avg[i] = 0;
         REP(i, N) {
-            if (src[i*L] < 1000) continue;
-            REP(j, L) avg[j] = avg[j] + src[i*L+j];
+//            if (src[i*L] < 200) continue;
+            REP(j, L) avg[j] = avg[j] + src[i*step*L+j];
             c ++;
         }
-        REP(i, L) avg[i] = (avg[i] + c/2) / c;
+        REP(i, L) avg[i] = (avg[i]) / c;
         int m=avg[0];
         FOR(i, 1, L) if (avg[i]<m) m = avg[i];
         //REP(i, L) avg[i] -= m;
@@ -196,7 +242,8 @@ public:
       //          cout << "rdiff " << x << " " ; REP(i, L) cout << tmp[i] << " "; cout << endl;
                 // encoding
                 bits.write(tmp[0] + HEADER_OFFSET, HEADER);
-                FOR(j, 1, L) encode_byte(tmp[j], bits);
+//                FOR(j, 1, L) encode_byte(tmp[j], bits);
+                REP(j, L/2) encode_two_byte(tmp[j*2+1], tmp[j*2+2], bits);
             }else{
                 bits.write(0, HEADER);
             }
@@ -234,7 +281,8 @@ public:
             tmp[0] = bits.peek(HEADER) - HEADER_OFFSET;
             bits.shift(HEADER);
             if (1) {
-                FOR(i, 1, L) tmp[i] = decode_byte(bits);
+//                FOR(i, 1, L) tmp[i] = decode_byte(bits);
+                REP(i, L/2) decode_two_byte(tmp[i*2+1], tmp[i*2+2], bits);
     //            cout << "rdiff " << x << " " ; REP(i, L) cout << tmp[i] << " "; cout << endl;
                 FOR(i, 1, L) tmp[i] += tmp[i-1];
       //          cout << "rdiff2 " << x << " " ; REP(i, L) cout << tmp[i] << " "; cout << endl;
@@ -267,7 +315,22 @@ int main(int argc, char **argv) {
     Bits bits2(r);
     REP(i, 10) rr[i] = comp.decode_byte(bits2);
     REP(i, 10) cout << rr[i] << " "; cout << endl;*/
-    
+    //
+    FOR(i, -5, 5) {
+        FOR(j, -5, 5) {
+            short buf[20];
+            Bits writer(buf);
+            comp.encode_two_byte(i, j, writer);
+            writer.flush();
+            Bits reader(buf);
+            int x,y;
+            comp.decode_two_byte(x, y, reader);
+            if (x!=i || y!=j) {
+                printf("failed %d %d %d %d\n", i, j, x, y);
+            }
+        }
+    }
+
     {
 /*    int h[256]={-3, -3, 0, -2, -1, 0, -1, -2, -1, -15, 17, -30, 34, -52, 51, -90, 95};
     int r[10000], rr[70], size=20;
@@ -325,7 +388,7 @@ int main(int argc, char **argv) {
             if (dst[j] < 0 || dst[j] > 16383) {
                 cout << j << " overflow " << dst[j] << endl;
             }
-            if (abs(d) >10) {
+            if (abs(d) >15) {
                 cout << j << " " << d << " " << src[j] << " " << dst[j] << endl;
             }
             diff += d;
