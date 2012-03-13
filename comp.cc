@@ -16,7 +16,7 @@ typedef vector<string> VS;
 typedef istringstream ISS;
 typedef ostringstream OSS;
 
-const int SCALE=20;
+const int SCALE=18;
 const int HEADER=11;
 const int HEADER_OFFSET= 1<<(HEADER-1);
 
@@ -69,14 +69,14 @@ Symbol dec_table[8] = {
 
 
 Symbol enc_table2[9] = {
-    {0xf, 4}, {0xb, 4}, {0xa, 4}, // -1
-    {0x4, 3}, {0x0, 1}, {0xc, 4}, // 0
-    {0xd, 4}, {0xe, 4}, {0xf, 4}, // 1
+    {0xf, 4}, {0x5, 3}, {0x0, 1}, // -1
+    {0x4, 3}, {0x0, 1}, {0x6, 3}, // 0
+    {0x0, 1}, {0xe, 4}, {0xf, 4}, // 1
 };
 
 Symbol dec_table2[16] = {
     {0x11, 1},{0x11, 1},{0x11, 1}, {0x11, 1}, {0x11, 1}, {0x11, 1}, {0x11, 1}, {0x11, 1},
-    {0x10, 3},{0x10, 3},{0x02, 4}, {0x01, 4}, {0x12, 4}, {0x20, 4}, {0x21, 4}, {0x00, 6},
+    {0x10, 3},{0x10, 3},{0x01, 3}, {0x01, 3}, {0x12, 3}, {0x12, 3}, {0x21, 4}, {0x00, 6},
 };
 
 
@@ -234,12 +234,19 @@ public:
         dst += L;
 
         struct Bits bits(dst);
+        int smooth = X*Y*L/2 * 0.18;
         REP(x, X*Y) {
             if (1) {
                 REP(j, L) tmp[j] = (src[j] - avg[j] + (src[j] > avg[j] ? SCALE/2 : -SCALE/2)) / SCALE;
     //            cout << "row " << x << " " ; REP(i, L) cout << tmp[i] << " "; cout << endl;
                 for(int j=L-1;j>0;j--) tmp[j] = tmp[j] - tmp[j-1];
       //          cout << "rdiff " << x << " " ; REP(i, L) cout << tmp[i] << " "; cout << endl;
+                // smooth
+                FOR(i, 1, L) if (smooth > 0 && tmp[i-1] + tmp[i]==0 && tmp[i-1]*tmp[i]== -1) {
+                    tmp[i-1] = 0;
+                    tmp[i] = 0;
+                    smooth --;
+                }
                 // encoding
                 bits.write(tmp[0] + HEADER_OFFSET, HEADER);
 //                FOR(j, 1, L) encode_byte(tmp[j], bits);
@@ -249,6 +256,7 @@ public:
             }
             src += L;
         }
+        cout << "smooth " << (smooth*100.0*2/X/Y/L) << endl;
         bits.flush();
         dst = bits.p;
 
@@ -359,8 +367,8 @@ int main(int argc, char **argv) {
         }
         
         int X=buffer[0], Y=buffer[1], L=buffer[2];
-        //X = 100;
-        //Y = 900;
+        X = 900;
+        Y = 900;
         n = fread(buffer+3, sizeof(short), X*Y*L, f);
         fclose(f);
         if (n <= 0) {
@@ -388,7 +396,7 @@ int main(int argc, char **argv) {
             if (dst[j] < 0 || dst[j] > 16383) {
                 cout << j << " overflow " << dst[j] << endl;
             }
-            if (abs(d) >15) {
+            if (abs(d) >30) {
                 cout << j << " " << d << " " << src[j] << " " << dst[j] << endl;
             }
             diff += d;
