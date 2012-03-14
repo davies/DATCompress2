@@ -20,6 +20,9 @@ const int SCALE=16;
 const int HEADER=11;
 const int HEADER_OFFSET= 1<<(HEADER-1);
 
+#define BYTE4
+//#define BYTE2
+
 class myvector : public std::vector<int>
 {
 public:
@@ -79,6 +82,18 @@ Symbol dec_table2[16] = {
     {0x10, 3},{0x10, 3},{0x01, 3}, {0x01, 3}, {0x12, 3}, {0x12, 3}, {0x21, 4}, {0x00, 6},
 };
 
+Symbol enc_table4[8] = {
+//    {0x0, 1},
+    {0x8, 4}, {0x9, 4}, {0xa, 4}, {0xb, 4},
+    {0x18, 5},{0x19,5}, {0x1a,5}, {0x1b,5},
+};
+
+Symbol dec_table4[32] = {
+    {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, 
+    {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, {0x1111, 1}, 
+    {0x0111, 4}, {0x0111, 4}, {0x1011, 4}, {0x1011, 4}, {0x1101, 4}, {0x1101, 4}, {0x1110, 4}, {0x1110, 4}, 
+    {0x2111, 5}, {0x1211, 5}, {0x1121, 5}, {0x1112, 5}, {0x1111, 3}, {0x1101, 3}, {0x1110, 3}, {0x1110, 3}, 
+};
 
 struct Bits {
     int data;
@@ -177,7 +192,6 @@ public:
     }
 
     inline void encode_two_byte(int d1, int d2, Bits &bits) {
-        //int m = (d1+1) | (d2+1);
         if (d1 < -1 || d1 > 1 || d2 < -1 || d2 > 1
             || d1==-1 && d2==-1 || d1==1 && d2==1) {
             bits.write(0xf, 4);
@@ -185,7 +199,6 @@ public:
             write_byte(d2, bits, 0);
         } else {
             int index = (d1+1)*3 + d2+1;
-  //          cout << index << " " << enc_table2[index].code << endl;
             bits.write(enc_table2[index].code, enc_table2[index].len);
         }
     }
@@ -194,13 +207,52 @@ public:
         int d = bits.peek(4);
         if (dec_table2[d].len <= 4) {
             bits.shift(dec_table2[d].len);
-//            cout << d << " " << dec_table2[d].code << endl;
             d1 = (dec_table2[d].code >> 4) - 1;
             d2 = (dec_table2[d].code & 0xf) - 1;
         } else {
             bits.shift(4);
             d1 = read_byte(bits, 0);
             d2 = read_byte(bits, 0);
+        }
+    }
+
+    inline void encode_byte4(int d1, int d2, int d3, int d4, Bits &bits) {
+        // four 0
+        int ord = d1 | d2 | d3 | d4;
+        if (ord == 0) {
+            bits.write(0, 1);
+            return; 
+        }
+        // one -1 or 1
+        int s = d1 + d2 + d3 + d4;
+        if (ord == 1 && s == 1 || s == -1 && ((d1+1)|(d2+1)|(d3+1)|(d4+1)) == 1) {
+            int index = int((s+1)/2) * 4 + abs(d2) + abs(d3)*2 + abs(d4)*3;
+//            cout << d1 << d2 << d3 << d4 << " " << index << endl;
+            bits.write(enc_table4[index].code, enc_table4[index].len);
+        }else{
+            // all others, fallback
+            bits.write(7, 3);
+            encode_two_byte(d1, d2, bits);
+            encode_two_byte(d3, d4, bits);
+        }
+    }
+
+    inline void decode_byte4(int &d1, int &d2, int &d3, int &d4, Bits &bits) {
+        int d = bits.peek(5);
+        if (dec_table4[d].len == 1) {
+            bits.shift(1);
+            d1 = d2 = d3 = d4 = 0;
+        } else if (dec_table4[d].len == 3) {
+            bits.shift(3);
+            decode_two_byte(d1, d2, bits);
+            decode_two_byte(d3, d4, bits);
+        } else {
+            bits.shift(dec_table4[d].len);
+            int code = dec_table4[d].code;
+            d1 = ((code >> 12) & 0xf) - 1;
+            d2 = ((code >> 8) & 0xf) - 1;
+            d3 = ((code >> 4) & 0xf) - 1;
+            d4 = (code & 0xf) - 1;
         }
     }
 
@@ -251,14 +303,22 @@ public:
                 }
                 // encoding
                 bits.write(tmp[0] + HEADER_OFFSET, HEADER);
+
+#ifdef BYTE4                
+                REP(j, (L-1)/4) encode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
+                if ((L-1)%4 > 1) encode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
+#else
+                REP(j, (L-1)/2) encode_two_byte(tmp[j*2+1], tmp[j*2+2], bits);
+#endif
+                if ((L-1)%2 > 0) encode_byte(tmp[L-1], bits);
+
 //                FOR(j, 1, L) encode_byte(tmp[j], bits);
-                REP(j, L/2) encode_two_byte(tmp[j*2+1], tmp[j*2+2], bits);
             }else{
                 bits.write(0, HEADER);
             }
             src += L;
         }
-        cout << "smooth " << (smooth*100.0*2/X/Y/L) << endl;
+//        cout << "smooth " << (smooth*100.0*2/X/Y/L) << endl;
         bits.flush();
         dst = bits.p;
 
@@ -291,8 +351,16 @@ public:
             tmp[0] = bits.peek(HEADER) - HEADER_OFFSET;
             bits.shift(HEADER);
             if (1) {
+#ifdef BYTE4                
+                REP(j, (L-1)/4) decode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
+                if ((L-1)%4 > 1) decode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
+#else
+                REP(i, (L-1)/2) decode_two_byte(tmp[i*2+1], tmp[i*2+2], bits);
+#endif
+                if ((L-1)%2 > 0) tmp[L-1] = decode_byte(bits);
 //                FOR(i, 1, L) tmp[i] = decode_byte(bits);
-                REP(i, L/2) decode_two_byte(tmp[i*2+1], tmp[i*2+2], bits);
+                
+
     //            cout << "rdiff " << x << " " ; REP(i, L) cout << tmp[i] << " "; cout << endl;
                 FOR(i, 1, L) tmp[i] += tmp[i-1];
       //          cout << "rdiff2 " << x << " " ; REP(i, L) cout << tmp[i] << " "; cout << endl;
@@ -326,8 +394,9 @@ int main(int argc, char **argv) {
     REP(i, 10) rr[i] = comp.decode_byte(bits2);
     REP(i, 10) cout << rr[i] << " "; cout << endl;*/
     //
-    FOR(i, -5, 5) {
-        FOR(j, -5, 5) {
+    FOR(i, -3, 3) {
+        FOR(j, -3, 3) {
+            if (i+j == 0 && i*j == -1) continue;
             short buf[20];
             Bits writer(buf);
             comp.encode_two_byte(i, j, writer);
@@ -337,6 +406,19 @@ int main(int argc, char **argv) {
             comp.decode_two_byte(x, y, reader);
             if (x!=i || y!=j) {
                 printf("failed %d %d %d %d\n", i, j, x, y);
+            }
+            FOR(k, -1, 1) {
+                FOR(l, -1, 1) {
+                    short buf[20];
+                    Bits writer(buf), reader(buf);
+                    comp.encode_byte4(i, j, k, l, writer);
+                    writer.flush();
+                    int x,y,z,w;
+                    comp.decode_byte4(x, y, z, w, reader);
+                    if (x!=i || y!=j || k!=z || l!=w) {
+                        printf("failed %d %d %d %d %d %d %d %d\n", i, j, k, l, x, y, z, w);
+                    }
+                }
             }
         }
     }
