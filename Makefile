@@ -1,6 +1,6 @@
 all: comp test
 
-comp: comp.cc
+comp: comp.cc o.h
 	g++ -Wall -W -O2 -pipe -g comp.cc -o comp
 
 test:comp
