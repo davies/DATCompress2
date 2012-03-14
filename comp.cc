@@ -17,8 +17,6 @@ typedef istringstream ISS;
 typedef ostringstream OSS;
 
 const int SCALE=16;
-const int HEADER=11;
-const int HEADER_OFFSET= 1<<(HEADER-1);
 
 #define BYTE4
 //#define BYTE2
@@ -288,7 +286,6 @@ public:
         struct Bits bits(dst);
         int smooth = X*Y*L/2 * 0.20;
         REP(x, X*Y) {
-            if (1) {
                 REP(j, L) tmp[j] = (src[j] - avg[j] + (src[j] > avg[j] ? SCALE/2 : -SCALE/2)) / SCALE;
     //            cout << "row " << x << " " ; REP(i, L) cout << tmp[i] << " "; cout << endl;
                 for(int j=L-1;j>0;j--) tmp[j] = tmp[j] - tmp[j-1];
@@ -302,7 +299,14 @@ public:
                     }
                 }
                 // encoding
-                bits.write(tmp[0] + HEADER_OFFSET, HEADER);
+                tmp[0] += 32;
+                int mod = tmp[0] % 64, cc = tmp[0]/64;
+                if (mod < 0) {
+                    mod += 64;
+                    cc -= 1;
+                }
+                bits.write(mod, 6);
+                encode_byte(cc, bits);
 
 #ifdef BYTE4                
                 REP(j, (L-1)/4) encode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
@@ -313,9 +317,6 @@ public:
                 if ((L-1)%2 > 0) encode_byte(tmp[L-1], bits);
 
 //                FOR(j, 1, L) encode_byte(tmp[j], bits);
-            }else{
-                bits.write(0, HEADER);
-            }
             src += L;
         }
 //        cout << "smooth " << (smooth*100.0*2/X/Y/L) << endl;
@@ -348,9 +349,9 @@ public:
         struct Bits bits(src);
         int tmp[100];
         REP(x, X*Y) {
-            tmp[0] = bits.peek(HEADER) - HEADER_OFFSET;
-            bits.shift(HEADER);
-            if (1) {
+            tmp[0] = bits.peek(6) - 32;
+            bits.shift(6);
+            tmp[0] += decode_byte(bits) * 64;
 #ifdef BYTE4                
                 REP(j, (L-1)/4) decode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
                 if ((L-1)%4 > 1) decode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
@@ -367,9 +368,6 @@ public:
                 REP(j, L) dst[j] = avg[j] + tmp[j] * SCALE;
                 REP(j, L) if(dst[j] < 0) dst[j] = 0;
                 REP(j, L) if(dst[j] > 16383) dst[j] = 16383;
-            }else{
-                REP(j, L) dst[j] = 0;
-            }
             dst += L;
         }
 
@@ -382,6 +380,7 @@ public:
 
 int main(int argc, char **argv) {
     DATCompression2 comp;
+//    cout << (-4 % 64) << " " << (-4 / 64) << endl;
     /*short r[20];
     int rr[20];
     int t[] = {0,-1,1, 2,-3, 0, 5,-6,-1, 0};
@@ -395,6 +394,15 @@ int main(int argc, char **argv) {
     REP(i, 10) cout << rr[i] << " "; cout << endl;*/
     //
     FOR(i, -3, 3) {
+        short buf[20];
+        Bits writer(buf);
+        comp.encode_byte(i, writer);
+        writer.flush();
+        Bits reader(buf);
+        int x = comp.decode_byte(reader);
+        if (x!=i) {
+            printf("failed %d %d\n", i,x);
+        }
         FOR(j, -3, 3) {
             if (i+j == 0 && i*j == -1) continue;
             short buf[20];
