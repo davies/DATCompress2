@@ -7,6 +7,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+
 using namespace std;
 
 typedef long long ll;
@@ -15,11 +17,6 @@ typedef vector< VI > VVI;
 typedef vector<string> VS;
 typedef istringstream ISS;
 typedef ostringstream OSS;
-
-//const int SCALE=18;
-
-#define BYTE4
-//#define BYTE2
 
 class myvector : public std::vector<int>
 {
@@ -191,7 +188,7 @@ public:
 
     inline void encode_two_byte(int d1, int d2, Bits &bits) {
         if (d1 < -1 || d1 > 1 || d2 < -1 || d2 > 1
-            || d1==-1 && d2==-1 || d1==1 && d2==1) {
+            || (d1==-1 && d2==-1) || (d1==1 && d2==1)) {
             bits.write(0xf, 4);
             write_byte(d1, bits, 0);
             write_byte(d2, bits, 0);
@@ -223,7 +220,7 @@ public:
         }
         // one -1 or 1
         int s = d1 + d2 + d3 + d4;
-        if (ord == 1 && s == 1 || s == -1 && ((d1+1)|(d2+1)|(d3+1)|(d4+1)) == 1) {
+        if ((ord == 1 && s == 1) || (s == -1 && ((d1+1)|(d2+1)|(d3+1)|(d4+1)) == 1)) {
             int index = int((s+1)/2) * 4 + abs(d2) + abs(d3)*2 + abs(d4)*3;
 //            cout << d1 << d2 << d3 << d4 << " " << index << endl;
             bits.write(enc_table4[index].code, enc_table4[index].len);
@@ -254,22 +251,27 @@ public:
         }
     }
 
-    int try_compress(short *src, int size, int L, int *avg, short *dst, int SCALE) {
+    template <int SCALE>
+    int try_compress(short *src, int size, int L, int *avg, short *dst) {
         int64_t vdiff = 0;
         int zero = 0;
         int tmp[60];
+        int half = SCALE/2;
+        int test = size/10;
         REP(x, size) {
-            REP(j, L) tmp[j] = (src[j] - avg[j] + (src[j] > avg[j] ? SCALE/2 : -SCALE/2)) / SCALE;
+            if (x > test && vdiff >= 38*x*L) return 0;
+
+            REP(j, L) tmp[j] = (src[j] - avg[j] + (src[j] > avg[j] ? half : -half)) / SCALE;
             for(int j=L-1;j>0;j--) tmp[j] = tmp[j] - tmp[j-1];
             
             // smooth
             if (vdiff < 36*x*L-6000) {
-                FOR(i, 2, L) if (tmp[i-1] + tmp[i]==0 && tmp[i-1]*tmp[i]== -1) {
+                FOR(i, 2, L) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]|tmp[i])== -1)) {
                     tmp[i-1] = 0;
                     tmp[i] = 0;
                 }
             } else {
-                for (int i=2; i<L; i+=2) if (tmp[i-1] + tmp[i]==0 && tmp[i-1]*tmp[i]== -1) {
+                for (int i=2; i<L; i+=2) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]|tmp[i])==-1)) {
                     tmp[i-1] = 0;
                     tmp[i] = 0;
                 }
@@ -315,9 +317,19 @@ public:
         int zero = 0, scale = 0;
         short *best=NULL, *buf=NULL;
 
-        FOR(ii, 16, 20) {
+        for(int ii=20; ii>12; ii--) {
             if (buf == NULL) buf = new short[X*Y*L];
-            int z = try_compress(src, X*Y, L, avg, buf, ii);
+            int z = 0;
+            switch (ii) {
+            case 20: z = try_compress<20>(src, X*Y, L, avg, buf); break;
+            case 19: z = try_compress<19>(src, X*Y, L, avg, buf); break;
+            case 18: z = try_compress<18>(src, X*Y, L, avg, buf); break;
+            case 17: z = try_compress<17>(src, X*Y, L, avg, buf); break;
+            case 16: z = try_compress<16>(src, X*Y, L, avg, buf); break;
+            case 15: z = try_compress<15>(src, X*Y, L, avg, buf); break;
+            case 14: z = try_compress<14>(src, X*Y, L, avg, buf); break;
+            case 13: z = try_compress<13>(src, X*Y, L, avg, buf); break;
+            }
             cout << "try " << ii << " " << (float(z)/X/Y/L) << endl; 
             if (z > zero) {
                 zero = z;
@@ -325,7 +337,7 @@ public:
                 short *p = best;
                 best = buf;
                 buf = p;
-            } else {
+            } else if (z < zero) {
                 break;
             }
         }
