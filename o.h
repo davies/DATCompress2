@@ -257,9 +257,9 @@ public:
         int zero = 0;
         int tmp[60];
         int half = SCALE/2;
-        int test = size/10;
+ //       int test = size/5;
         REP(x, size) {
-            if (x > test && vdiff >= 38*x*L) return 0;
+//            if (x > test && vdiff >= 40*x*L) return 0;
 
             REP(j, L) tmp[j] = (src[j] - avg[j] + (src[j] > avg[j] ? half : -half)) / SCALE;
             for(int j=L-1;j>0;j--) tmp[j] = tmp[j] - tmp[j-1];
@@ -317,7 +317,7 @@ public:
         int zero = 0, scale = 0;
         short *best=NULL, *buf=NULL;
 
-        for(int ii=20; ii>12; ii--) {
+        for(int ii=19; ii>12; ii--) {
             if (buf == NULL) buf = new short[X*Y*L];
             int z = 0;
             switch (ii) {
