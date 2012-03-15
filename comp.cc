@@ -53,19 +53,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    {
-/*    int h[256]={-3, -3, 0, -2, -1, 0, -1, -2, -1, -15, 17, -30, 34, -52, 51, -90, 95};
-    int r[10000], rr[70], size=20;
-    REP(i, size) h[i] = i;
-    REP(i, size) cout << h[i] << " "; cout << endl;
-    int n = comp.huffman_encode(h, size, r);
-    REP(i, n) cout << r[i] << " "; cout << endl;
-    int m = comp.huffman_decode(r, size, rr);
-    cout << size << " -> " << n << " " << m << endl;
-    //REP(i, size) rr[i] -= 128;
-    REP(i, size) cout << rr[i] << " "; cout << endl;*/
-    }
-
     for(int i=1; i<argc; i++) {
         FILE *f = fopen(argv[i], "r");
         if (f == NULL) {
@@ -106,18 +93,20 @@ int main(int argc, char **argv) {
         uint64_t diffv = 0;
         short *src = &buffer[3], *dst = ((short*)&odata[0]) + 3;
         int N = X*Y*L;
+        cout << endl;
         REP(j, N) {
-            short d = src[j] - dst[j];
+            short d = dst[j] - src[j];
+//            cout << diffv << " " << dst[j] << " " << d << " ;";
             if (dst[j] < 0 || dst[j] > 16383) {
                 cout << j << " overflow " << dst[j] << endl;
             }
             if (abs(d) >50) {
-                cout << j << " " << d << " " << src[j] << " " << dst[j] << endl;
+//                cout << j << " " << d << " " << src[j] << " " << dst[j] << endl;
             }
             diff += d;
             diffv += d*d;
         }
-        cout << argv[i] << " " << X << " " << Y << " " << L << " ratio " << ratio << " used " << t << " diff " << (diff / N) << " " << (diffv / N) << endl;
+        cout << argv[i] << " " << X << " " << Y << " " << L << " ratio " << ratio << " used " << t << " diff " << (diff / N) << " " << (diffv/N) << endl;
     }
     return 0;
 }

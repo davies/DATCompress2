@@ -4,7 +4,7 @@ comp: comp.cc o.h
 	g++ -Wall -W -O2 -pipe -g comp.cc -o comp
 
 test:comp
-	./comp data/1558dee2ecfb7a0f9f63e27376675b6c.dat
+	./comp data/f26fbc235167ab7630e19634d254fa26.dat data/1558dee2ecfb7a0f9f63e27376675b6c.dat
 
 profile:comp
 	sudo opcontrol --reset
