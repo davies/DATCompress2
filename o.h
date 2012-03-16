@@ -142,27 +142,39 @@ struct Bits {
     }
 };
 
+const int MAX_BITS = 14;
 
 class DATCompression2 {
 public:
     inline void write_byte(int d, Bits &bits, int base) {
         bits.write(d > 0 ? 1 : 0, 1);
         d = abs(d) - base;
-        while (d > 0) {
+        int c = 0;
+        while (d > 0 && c < MAX_BITS) {
             bits.write(1, 1);
             d --;
+            c ++;
         }
+        if (c == MAX_BITS) bits.write(d, 14);
         bits.write(0, 1);
     }
 
     inline int read_byte(Bits &bits, int base) {
         int flag = bits.read_bit();
         int r = base;
-        int n = bits.read_bit();
-        while (n) {
+        int n = bits.peek(1);
+        int c = 0;
+        while (n && c < MAX_BITS) {
+            bits.shift(1);
             r ++;
-            n = bits.read_bit();
+            c ++;
+            n = bits.peek(1);
         }
+        if (c == MAX_BITS) {
+            r += bits.peek(14);
+            bits.shift(14);
+        }
+        bits.shift(1);
         return flag ? r : -r;
     }
     
@@ -265,7 +277,7 @@ public:
             for(int j=L-1;j>0;j--) tmp[j] = tmp[j] - tmp[j-1];
             
             // smooth
-            if (vdiff < 36*x*L-6000) {
+            if (vdiff < 36*x*L-2000) {
                 FOR(i, 2, L) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]|tmp[i])== -1)) {
                     tmp[i-1] = 0;
                     tmp[i] = 0;

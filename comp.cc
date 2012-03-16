@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
     REP(i, 10) rr[i] = comp.decode_byte(bits2);
     REP(i, 10) cout << rr[i] << " "; cout << endl;*/
     //
-    FOR(i, -3, 3) {
+    FOR(i, -30, 30) {
         short buf[20];
         Bits writer(buf);
         comp.encode_byte(i, writer);
