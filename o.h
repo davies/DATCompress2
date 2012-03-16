@@ -140,6 +140,13 @@ struct Bits {
         shift(1);
         return r;
     }
+    void rollback(void) {
+        if (bits >= 16) {
+            p --;
+            data >>= 16;
+            bits -= 16;
+        }
+    }
 };
 
 const int MAX_BITS = 14;
@@ -312,37 +319,62 @@ public:
     VI compress(VI &dat) {
         short *src = (short*) &dat[0];
         int X=src[0], Y=src[1], L=src[2];
-        //cout << X << Y << L << " " << SZ(dat) << endl;
+//        cout << X << Y << L << " " << SZ(dat) << endl;
         src += 3;
-        int avg[60] = {0}, N=X*Y, c=0;
-        if (N>10000) N = 10000;
-        int step = X*Y/N;
+
+        const int BLOCKS = 30;
+        int N = X / BLOCKS * Y;
+
+        myvector myoutput(SZ(dat)+1000);
+        short *dst = (short*)&myoutput[0];
+        *dst++ = X;
+        *dst++ = Y;
+        *dst++ = L;
+        *dst++ = BLOCKS;
+
+        REP(b, BLOCKS) {
+            int n = compress_block(src, N, L, dst);
+        //    cout << "compress " << n << endl;
+            src += N * L;
+            dst += n;
+        }
+        if (X % BLOCKS != 0) {
+            dst += compress_block(src, (X % BLOCKS) * Y, L, dst);
+        }
+
+        myoutput.myresize((dst - (short*)&myoutput[0]+1)/2);
+        VI output;
+        output.swap(myoutput);
+        return output;
+    }
+
+    int compress_block(short *src, int N, int L, short *dst) {
+        int avg[60] = {0}, c=N;
+        if (c>40000) c = 40000;
+        int step = N/c;
         REP(i, L) avg[i] = 0;
-        REP(i, N) {
-//            if (src[i*L] < 200) continue;
+        REP(i, c) {
             REP(j, L) avg[j] = avg[j] + src[i*step*L+j];
-            c ++;
         }
         REP(i, L) avg[i] = (avg[i]) / c;
-//        REP(i, L) cout << avg[i] << " "; cout << endl;
        
         int zero = 0, scale = 0;
         short *best=NULL, *buf=NULL;
 
         for(int ii=17; ii>12 && ii<21; ii++) {
-            if (buf == NULL) buf = new short[X*Y*L];
+            if (buf == NULL) buf = new short[N*L];
             int z = 0;
             switch (ii) {
-            case 20: z = try_compress<20>(src, X*Y, L, avg, buf); break;
-            case 19: z = try_compress<19>(src, X*Y, L, avg, buf); break;
-            case 18: z = try_compress<18>(src, X*Y, L, avg, buf); break;
-            case 17: z = try_compress<17>(src, X*Y, L, avg, buf); break;
-            case 16: z = try_compress<16>(src, X*Y, L, avg, buf); break;
-            case 15: z = try_compress<15>(src, X*Y, L, avg, buf); break;
-            case 14: z = try_compress<14>(src, X*Y, L, avg, buf); break;
-            case 13: z = try_compress<13>(src, X*Y, L, avg, buf); break;
+            case 20: z = try_compress<20>(src, N, L, avg, buf); break;
+            case 19: z = try_compress<19>(src, N, L, avg, buf); break;
+            case 18: z = try_compress<18>(src, N, L, avg, buf); break;
+            case 17: z = try_compress<17>(src, N, L, avg, buf); break;
+            case 16: z = try_compress<16>(src, N, L, avg, buf); break;
+            case 15: z = try_compress<15>(src, N, L, avg, buf); break;
+            case 14: z = try_compress<14>(src, N, L, avg, buf); break;
+            case 13: z = try_compress<13>(src, N, L, avg, buf); break;
             }
-            cout << "try " << ii << " " << (float(z)/X/Y/L) << endl; 
+            //cout << "try " << ii << " " << (float(z)/X/Y/L) << endl; 
             if (z == 0) {
                 if (ii > 18) break;
                 // scan down
@@ -362,21 +394,17 @@ public:
         if (buf != NULL) delete []buf;
 
         // output
-        myvector myoutput(SZ(dat)+1000);
-        short *dst = (short*)&myoutput[0];
-        *dst++ = X;
-        *dst++ = Y;
-        *dst++ = L;
-        *dst++ = scale;
+        short *start = dst;
         REP(i, L) dst[i] = avg[i];
         dst += L;
 
-        bool fourbyte = zero > 0.815 * X * Y * L;
+        *dst++ = scale;
+        bool fourbyte = zero > 0.815 * N * L;
         *dst ++ = int(fourbyte);
         //cout << "fourbyte " << fourbyte << endl;
         struct Bits bits(dst);
         short *tmp = best;
-        REP(x, X*Y) {
+        REP(x, N) {
             // encoding
             int mod = (tmp[0]+32) % 64, cc = (tmp[0]+32)/64;
             if (mod < 0) {
@@ -399,73 +427,85 @@ public:
         }
         bits.flush();
 
-        // test 
-        {
-        short *t=best;
-        struct Bits bits(dst);
-        int tmp[60];
-        REP(x, X*Y) {
-            tmp[0] = bits.peek(6) - 32;
-            bits.shift(6);
-            tmp[0] += decode_byte(bits) * 64;
-            
-            if (fourbyte) {
-                REP(j, (L-1)/4) decode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
-                if ((L-1)%4 > 1) decode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
-            } else {
-                REP(i, (L-1)/2) decode_two_byte(tmp[i*2+1], tmp[i*2+2], bits);
-            }
+        //// test 
+        //{
+        //short *t=best;
+        //struct Bits bits(dst);
+        //int tmp[60];
+        //REP(x, X*Y) {
+        //    tmp[0] = bits.peek(6) - 32;
+        //    bits.shift(6);
+        //    tmp[0] += decode_byte(bits) * 64;
+        //    
+        //    if (fourbyte) {
+        //        REP(j, (L-1)/4) decode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
+        //        if ((L-1)%4 > 1) decode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
+        //    } else {
+        //        REP(i, (L-1)/2) decode_two_byte(tmp[i*2+1], tmp[i*2+2], bits);
+        //    }
 
-            REP(i, L) if (t[i] != tmp[i]) cout << x << " " << i << " " << t[i] << " != " << tmp[i] << endl;
-            t += L;
-        }
-        }
-
-        dst = bits.p;
-        myoutput.myresize((dst - (short*)&myoutput[0]+1)/2);
+        //    REP(i, L) if (t[i] != tmp[i]) cout << x << " " << i << " " << t[i] << " != " << tmp[i] << endl;
+        //    t += L;
+        //}
+        
         delete []best;
 
-        VI output;
-        output.swap(myoutput);
-        return output;
+        return bits.p - start;
     }
 
     VI decompress(VI &dat) {
         short *src = (short*) &dat[0];
-        int X=src[0], Y=src[1], L=src[2], SCALE=src[3];
-        src += 4;
-        short* avg = src;
-        src += L;
-//        cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
+        int X=src[0], Y=src[1], L=src[2];
+        src += 3;
+        int BLOCKS = *src++, LAST=0;
+        int N = X/BLOCKS * Y;
+        if (X % BLOCKS != 0) LAST=1;
+  //      cout << "block " << BLOCKS << endl;
 
         myvector myoutput((X*Y*L+4)/2);
         short *dst = (short*)&myoutput[0];
         *dst++ = X;
         *dst++ = Y;
         *dst++ = L;
-        
-        bool fourbyte = *src++;
-        //cout << "fourbyte " << fourbyte << endl;
-        struct Bits bits(src);
-        int tmp[100];
-        REP(x, X*Y) {
-            tmp[0] = bits.peek(6) - 32;
-            bits.shift(6);
-            tmp[0] += decode_byte(bits) * 64;
-            
-            if (fourbyte) {
-                REP(j, (L-1)/4) decode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
-                if ((L-1)%4 > 1) decode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
-            } else {
-                REP(i, (L-1)/2) decode_two_byte(tmp[i*2+1], tmp[i*2+2], bits);
+    
+        REP(b, BLOCKS+LAST) {
+            // last block
+            if (X % BLOCKS != 0 && b == BLOCKS) {
+                N = (X % BLOCKS) * Y;
+//                cout << "last block " << N << endl;
             }
-            if ((L-1)%2 > 0) tmp[L-1] = decode_byte(bits);
+
+            short* avg = src;
+//          cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
+            src += L;
+            int SCALE= *src++;
+            bool fourbyte = *src++;
+            struct Bits bits(src);
+
+ //           cout << "block " << b << " " << SCALE << " " << fourbyte << " " << endl;
+            int tmp[64];
+            REP(x, N) {
+                tmp[0] = bits.peek(6) - 32;
+                bits.shift(6);
+                tmp[0] += decode_byte(bits) * 64;
                 
-            FOR(i, 1, L) tmp[i] += tmp[i-1];
-            REP(j, L) dst[j] = avg[j] + tmp[j] * SCALE;
-            REP(j, L) if(dst[j] < 0) dst[j] = 0;
-            REP(j, L) if(dst[j] > 16383) dst[j] = 16383;
-            dst += L;
+                if (fourbyte) {
+                    REP(j, (L-1)/4) decode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
+                    if ((L-1)%4 > 1) decode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
+                } else {
+                    REP(i, (L-1)/2) decode_two_byte(tmp[i*2+1], tmp[i*2+2], bits);
+                }
+                if ((L-1)%2 > 0) tmp[L-1] = decode_byte(bits);
+                    
+                FOR(i, 1, L) tmp[i] += tmp[i-1];
+                REP(j, L) dst[j] = avg[j] + tmp[j] * SCALE;
+                REP(j, L) if(dst[j] < 0) dst[j] = 0;
+                REP(j, L) if(dst[j] > 16383) dst[j] = 16383;
+                dst += L;
+            }
+            bits.rollback();
+            src = bits.p; // next block
+//            cout << "block size " << (src - avg) << endl;
         }
 
         VI output;

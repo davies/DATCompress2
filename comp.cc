@@ -82,25 +82,39 @@ int main(int argc, char **argv) {
             cout << " data too short " << n << " < " << (X * Y * L) << endl;
             continue;
         }
+        //// stat for header
+        //int st[20];
+        //REP(j, 20) st[j] = 0;
+        //REP(x, X) REP(y, Y) {
+        //    int v = buffer[(x*Y+y)*L+4];
+        //    st[v/1000] = st[v/1000] + 1;
+        //}
+        //cout << "HEADER: "<<i<<" "; REP(j, 17) cout << st[j] << "\t" ; cout << endl;
+
         buffer[0] = X;
         buffer[1] = Y;
-       
+
+        X = X/1;
+        REP(k, 1){
+        short *header = buffer + k * X * Y * L;
+        header[0] = X; header[1] = Y; header[2] = L;
         clock_t start = clock();
-        VI result = comp.compress(input);
+        VI inp((int*)header, (int*)(header+X*Y*L+4));
+        VI result = comp.compress(inp);
         VI odata = comp.decompress(result);
         double ratio = double(SZ(odata))/SZ(result);
         double t = float(clock() - start)/CLOCKS_PER_SEC;
 
         int diff = 0;
         int64_t diffv = 0;
-        short *src = &buffer[3], *dst = ((short*)&odata[0]) + 3;
+        short *src = &header[3], *dst = ((short*)&odata[0]) + 3;
         int N = X*Y*L;
         cout << endl;
         REP(j, N) {
             short d = dst[j] - src[j];
 //            cout << diffv << " " << dst[j] << " " << d << " ;";
             if (dst[j] < 0 || dst[j] > 16383) {
-                cout << j << " overflow " << dst[j] << endl;
+//                cout << j << " overflow " << dst[j] << endl;
             }
             if (abs(d) >50) {
 //                cout << j << " " << d << " " << src[j] << " " << dst[j] << endl;
@@ -113,6 +127,7 @@ int main(int argc, char **argv) {
             total += ratio;
         }
         cout << argv[i] << " " << X << " " << Y << " " << L << " ratio " << ratio << " used " << t << " diff " << (diff / N) << " " << (diffv/N) << endl;
+        }
     }
     cout << "total " << valid << " ratio " << (total / valid) << endl;
     return 0;
