@@ -53,6 +53,8 @@ int main(int argc, char **argv) {
         }
     }
 
+    float total = 0;
+    int valid=0;
     for(int i=1; i<argc; i++) {
         FILE *f = fopen(argv[i], "r");
         if (f == NULL) {
@@ -90,7 +92,7 @@ int main(int argc, char **argv) {
         double t = float(clock() - start)/CLOCKS_PER_SEC;
 
         int diff = 0;
-        uint64_t diffv = 0;
+        int64_t diffv = 0;
         short *src = &buffer[3], *dst = ((short*)&odata[0]) + 3;
         int N = X*Y*L;
         cout << endl;
@@ -106,7 +108,12 @@ int main(int argc, char **argv) {
             diff += d;
             diffv += d*d;
         }
+        valid += 1;
+        if (t < 8 && diffv < 36*N) {
+            total += ratio;
+        }
         cout << argv[i] << " " << X << " " << Y << " " << L << " ratio " << ratio << " used " << t << " diff " << (diff / N) << " " << (diffv/N) << endl;
     }
+    cout << "total " << valid << " ratio " << (total / valid) << endl;
     return 0;
 }

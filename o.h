@@ -278,12 +278,12 @@ public:
             
             // smooth
             if (vdiff < 36*x*L-2000) {
-                FOR(i, 2, L) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]|tmp[i])== -1)) {
+                FOR(i, 2, L) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]*tmp[i])== -1)) {
                     tmp[i-1] = 0;
                     tmp[i] = 0;
                 }
             } else {
-                for (int i=2; i<L; i+=2) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]|tmp[i])==-1)) {
+                for (int i=2; i<L; i+=2) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]*tmp[i])==-1)) {
                     tmp[i-1] = 0;
                     tmp[i] = 0;
                 }
@@ -329,7 +329,7 @@ public:
         int zero = 0, scale = 0;
         short *best=NULL, *buf=NULL;
 
-        for(int ii=19; ii>12; ii--) {
+        for(int ii=17; ii>12 && ii<21; ii++) {
             if (buf == NULL) buf = new short[X*Y*L];
             int z = 0;
             switch (ii) {
@@ -343,13 +343,19 @@ public:
             case 13: z = try_compress<13>(src, X*Y, L, avg, buf); break;
             }
             cout << "try " << ii << " " << (float(z)/X/Y/L) << endl; 
-            if (z > zero) {
+            if (z == 0) {
+                if (ii > 18) break;
+                // scan down
+                if (ii == 18) ii -= 3;
+                else ii -= 2;
+            } else if (z > zero) {
                 zero = z;
                 scale = ii;
                 short *p = best;
                 best = buf;
                 buf = p;
-            } else if (z < zero) {
+                if (ii < 17) ii -= 2; // scan down
+            } else if (z <= zero) {
                 break;
             }
         }
@@ -372,8 +378,7 @@ public:
         short *tmp = best;
         REP(x, X*Y) {
             // encoding
-            tmp[0] += 32;
-            int mod = tmp[0] % 64, cc = tmp[0]/64;
+            int mod = (tmp[0]+32) % 64, cc = (tmp[0]+32)/64;
             if (mod < 0) {
                 mod += 64;
                 cc -= 1;
@@ -393,6 +398,29 @@ public:
             tmp += L;
         }
         bits.flush();
+
+        // test 
+        {
+        short *t=best;
+        struct Bits bits(dst);
+        int tmp[60];
+        REP(x, X*Y) {
+            tmp[0] = bits.peek(6) - 32;
+            bits.shift(6);
+            tmp[0] += decode_byte(bits) * 64;
+            
+            if (fourbyte) {
+                REP(j, (L-1)/4) decode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
+                if ((L-1)%4 > 1) decode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
+            } else {
+                REP(i, (L-1)/2) decode_two_byte(tmp[i*2+1], tmp[i*2+2], bits);
+            }
+
+            REP(i, L) if (t[i] != tmp[i]) cout << x << " " << i << " " << t[i] << " != " << tmp[i] << endl;
+            t += L;
+        }
+        }
+
         dst = bits.p;
         myoutput.myresize((dst - (short*)&myoutput[0]+1)/2);
         delete []best;
