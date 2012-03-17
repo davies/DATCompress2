@@ -37,8 +37,9 @@ int main(int argc, char **argv) {
             if (x!=i || y!=j) {
                 printf("failed %d %d %d %d\n", i, j, x, y);
             }
-            FOR(k, -1, 1) {
-                FOR(l, -1, 1) {
+            FOR(k, -1, 2) {
+                FOR(l, -1, 2) {
+                    if (k+l == 0 && k*l == -1) continue;
                     short buf[20];
                     Bits writer(buf), reader(buf);
                     comp.encode_byte4(i, j, k, l, writer);
@@ -52,7 +53,7 @@ int main(int argc, char **argv) {
             }
         }
     }
-
+    
     float total = 0;
     int valid=0;
     for(int i=1; i<argc; i++) {
