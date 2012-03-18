@@ -239,7 +239,7 @@ struct Huffman {
         }
     }
 
-    int bitCount(int x) {
+    inline int bitCount(int x) {
         int b=0;
         while (x > 0) {
             b++;
@@ -248,13 +248,13 @@ struct Huffman {
         return b;
     }
 
-    int encodeSize(int x) {
+    inline int encodeSize(int x) {
         if (x < 8) return x;
         int bc = bitCount(x);
         return -8 + (bc <<2) + ((x >> (bc-3)) & 3);
     }
 
-    int decodeSize(int x) {
+    inline int decodeSize(int x) {
         if (x<8) return x;
         return (4 + (x & 3) ) << ((x >>2) -1);
     }
@@ -267,19 +267,23 @@ struct Huffman {
             bits.write(opos[ii]&0xffff, 16);
             bits.write(opos[ii] >> 16, 8);
             if (opos[ii] ==0) continue;
-            int start=0;
-            while(sizes[ii][start]==0) start ++;
-//            cout << ii << " write freq " << start << " " << bps[ii]  << " " << opos[ii] << endl;
-            bits.write(start & 0xffff, 16);
-            bits.write(start >> 16, 8);
-
-            FOR(j, start, opos[ii]+1) {
-                if (sizes[ii][j] > 0) {
-                    bits.write(1, 1);
-                    bits.write(sizes[ii][j], bps[ii]);
-                } else {
-                    bits.write(0, 1);
+            
+            int cnt = 0, last=0, md=1;
+            REP(j, opos[ii]+1) if (sizes[ii][j]>0) {
+                cnt ++;
+                if (j-last > md) {
+                    md = j-last;
                 }
+                last = j;
+            }
+            int cbps = bitCount(md);
+            bits.write(cbps, 8);
+            bits.write(cnt, 16);
+            last=0;
+            REP(j, opos[ii]+1) if (sizes[ii][j]>0) {
+                bits.write(j-last, cbps);
+                bits.write(sizes[ii][j], bps[ii]);
+                last = j;
             }
         }
     }
@@ -292,14 +296,14 @@ struct Huffman {
             opos[ii] = bits.read(16);
             opos[ii] += bits.read(8) << 16;
             if (opos[ii] ==0) continue;
-            int start = bits.read(16);
-            start += bits.read(8) << 16;
-//            cout << ii << " read freq " << start << " " << bps[ii] << " " << opos[ii] << endl;
-            FOR(j, start, opos[ii]+1) {
-                if (bits.read_bit()) {
-                    sizes[ii][j] = bits.read(bps[ii]);
-//                    cout << j << " " << sizes[ii][j] << endl;
-                }
+            
+            int cbps = bits.read(8);
+            int cnt = bits.read(16);
+            int last = 0;
+            REP(j, cnt) {
+                int df = bits.read(cbps);
+                sizes[ii][last+df] = bits.read(bps[ii]);
+                last += df;
             }
         }
     }
@@ -443,15 +447,15 @@ struct Huffman {
         }
     }
   
-    bool is_valid(short *d, int size) {
+    inline bool is_valid(short *d, int size) {
         if (size == 1) {
-            return abs(*d) <= NUM_LIMIT; 
+            return -NUM_LIMIT <= *d && *d <= NUM_LIMIT; 
         }
-        REP(i, size) if (abs(d[i]) > 1) return false;
+        REP(i, size) if (d[i] > 1 || d[i] < -1) return false;
         return true;
     }
 
-    int gen_key(short *d, int size) {
+    inline int gen_key(short *d, int size) {
         if (size == 1) return *d + NUM_LIMIT;
         int in = 0;
         REP(i, size) { in *= 3; in += d[i]+1;}
@@ -459,7 +463,7 @@ struct Huffman {
         return in;
     }
 
-    void decode_key(short *dst, int size, int v) {
+    inline void decode_key(short *dst, int size, int v) {
         if (size == 1) {
             *dst = v - NUM_LIMIT;
         } else {
@@ -692,13 +696,13 @@ public:
     }
 
     template <int SCALE>
-    int try_compress(short *src, int size, int L, int *avg, short *dst) {
+    int try_compress(short *src, int size, int L, int *avg, short *dst, int step) {
         int64_t vdiff = 0;
         int zero = 0;
         int tmp[60];
         int half = SCALE/2;
  //       int test = size/5;
-        REP(x, size) {
+        REP(x, size/step) {
 //            if (x > test && vdiff >= 40*x*L) return 0;
 
             REP(j, L) tmp[j] = (src[j] - avg[j] + (src[j] > avg[j] ? half : -half)) / SCALE;
@@ -711,10 +715,10 @@ public:
                     tmp[i] = 0;
                 }
             } else {
-                for (int i=2; i<L; i+=2) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]*tmp[i])==-1)) {
-                    tmp[i-1] = 0;
-                    tmp[i] = 0;
-                }
+//                for (int i=2; i<L; i+=2) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]*tmp[i])==-1)) {
+//                    tmp[i-1] = 0;
+//                    tmp[i] = 0;
+//                }
             }
             
             // counting
@@ -730,7 +734,7 @@ public:
                 vdiff += df * df;
             }
 
-            src += L;
+            src += L*step;
             dst += L;
         }
         if (vdiff >= 36 * size * L) zero = 0;
@@ -769,6 +773,21 @@ public:
         return output;
     }
 
+    int call_try_compress(short *src, int N, int L, int *avg, short *buf, int scale, int step) {
+        int z = 0;
+        switch (scale) {
+        case 20: z = try_compress<20>(src, N, L, avg, buf, step); break;
+        case 19: z = try_compress<19>(src, N, L, avg, buf, step); break;
+        case 18: z = try_compress<18>(src, N, L, avg, buf, step); break;
+        case 17: z = try_compress<17>(src, N, L, avg, buf, step); break;
+        case 16: z = try_compress<16>(src, N, L, avg, buf, step); break;
+        case 15: z = try_compress<15>(src, N, L, avg, buf, step); break;
+        case 14: z = try_compress<14>(src, N, L, avg, buf, step); break;
+        case 13: z = try_compress<13>(src, N, L, avg, buf, step); break;
+        }
+        return z;
+    }
+
     int compress_block(short *src, int N, int L, short *dst) {
         int avg[60] = {0}, c=N;
         if (c>40000) c = 40000;
@@ -784,17 +803,7 @@ public:
 
         for(int ii=17; ii>12 && ii<21; ii++) {
             if (buf == NULL) buf = new short[N*L];
-            int z = 0;
-            switch (ii) {
-            case 20: z = try_compress<20>(src, N, L, avg, buf); break;
-            case 19: z = try_compress<19>(src, N, L, avg, buf); break;
-            case 18: z = try_compress<18>(src, N, L, avg, buf); break;
-            case 17: z = try_compress<17>(src, N, L, avg, buf); break;
-            case 16: z = try_compress<16>(src, N, L, avg, buf); break;
-            case 15: z = try_compress<15>(src, N, L, avg, buf); break;
-            case 14: z = try_compress<14>(src, N, L, avg, buf); break;
-            case 13: z = try_compress<13>(src, N, L, avg, buf); break;
-            }
+            int z = call_try_compress(src, N, L, avg, buf, ii, 16);
             //cout << "try " << ii << " " << (float(z)/X/Y/L) << endl; 
             if (z == 0) {
                 if (ii > 18) break;
@@ -813,6 +822,12 @@ public:
             }
         }
         if (buf != NULL) delete []buf;
+
+        int z = call_try_compress(src, N, L, avg, best, scale, 1);
+        if (z==0) {
+            scale --;
+            call_try_compress(src, N, L, avg, best, scale, 1);
+        }
 
         // output
         short *start = dst;
@@ -936,6 +951,7 @@ public:
             }
             bits.rollback();
             src = bits.p; // next block
+            delete hm;
 //            cout << "block size " << (src - avg) << endl;
         }
 
