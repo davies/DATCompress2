@@ -451,7 +451,10 @@ struct Huffman {
         if (size == 1) {
             return -NUM_LIMIT <= *d && *d <= NUM_LIMIT; 
         }
-        REP(i, size) if (d[i] > 1 || d[i] < -1) return false;
+        for(int i=0; i<size-1; i+= 2) {
+            if (d[i] > 1 || d[i] < -1) return false;
+            if (d[i+1] > 1 || d[i+1] < -1) return false;
+        }
         return true;
     }
 
@@ -695,49 +698,57 @@ public:
         }
     }
 
+    inline int calc_diff(short v, short ov) {
+//        if (v < 0) v=0; if (v>16383) v=16383;
+        int df = (v - ov);
+        return df * df;
+    }
+
     template <int SCALE>
     int try_compress(short *src, int size, int L, int *avg, short *dst, int step) {
         int64_t vdiff = 0;
         int zero = 0;
-        int tmp[60];
         int half = SCALE/2;
- //       int test = size/5;
-        REP(x, size/step) {
-//            if (x > test && vdiff >= 40*x*L) return 0;
-
+        size /= step;
+        REP(x, size) {
+            short *tmp = dst;
             REP(j, L) tmp[j] = (src[j] - avg[j] + (src[j] > avg[j] ? half : -half)) / SCALE;
-            for(int j=L-1;j>0;j--) tmp[j] = tmp[j] - tmp[j-1];
             
             // smooth
+            vdiff += calc_diff(tmp[0]*SCALE + avg[0], src[0]);
+            short prev = 0;
             if (vdiff < 36*x*L-2000) {
-                FOR(i, 2, L) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]*tmp[i])== -1)) {
-                    tmp[i-1] = 0;
-                    tmp[i] = 0;
+                for(int j=L-1;j>0;j--) {
+                    short d = tmp[j] - tmp[j-1];
+                    if (d != 0 && d+prev==0 && d * prev==-1) {
+                        d = 0;
+                        dst[j+1] = 0;
+                        zero ++;
+                    }
+                    if (d==0) zero ++;
+                    vdiff += calc_diff((tmp[j-1]+d) * SCALE + avg[j], src[j]);
+                    dst[j] = d;
+                    prev = d;
                 }
             } else {
-//                for (int i=2; i<L; i+=2) if ((tmp[i-1] + tmp[i]==0) && ((tmp[i-1]*tmp[i])==-1)) {
-//                    tmp[i-1] = 0;
-//                    tmp[i] = 0;
-//                }
+                for(int j=L-1;j>0;j--) {
+                    short d = tmp[j] - tmp[j-1];
+                    if (d != 0 && (j&1) && d+prev==0 && d * prev==-1) {
+                        d = 0;
+                        dst[j+1] = 0;
+                        zero ++;
+                    }
+                    if (d==0) zero ++;
+                    vdiff += calc_diff((tmp[j-1]+d) * SCALE + avg[j], src[j]);
+                    dst[j] = d;
+                    prev = d;
+                }
             }
             
-            // counting
-            FOR(i, 1, L) if (tmp[i]==0) zero ++;
-            REP(i, L) dst[i] = tmp[i];
-
-            // calc vdiff
-            FOR(i, 1, L) tmp[i] += tmp[i-1];
-            REP(i, L) {
-                int v = tmp[i] * SCALE + avg[i];
-                if (v < 0) v=0; if (v>16383) v=16383;
-                int df = (v - src[i]);
-                vdiff += df * df;
-            }
-
             src += L*step;
             dst += L;
         }
-        if (vdiff >= 36 * size * L) zero = 0;
+        if (vdiff >= 36 * size  * L) zero = 0;
         return zero;
     }
 
@@ -747,25 +758,30 @@ public:
 //        cout << X << Y << L << " " << SZ(dat) << endl;
         src += 3;
 
-        const int BLOCKS = 30;
-        int N = X / BLOCKS * Y;
+        int XBLOCKS = 9;
+        int YBLOCKS = 9;
+        while (X % XBLOCKS != 0) XBLOCKS --;
+        while (Y % YBLOCKS != 0) YBLOCKS --;
 
         myvector myoutput(SZ(dat)+1000);
         short *dst = (short*)&myoutput[0];
         *dst++ = X;
         *dst++ = Y;
         *dst++ = L;
-        *dst++ = BLOCKS;
-
-        REP(b, BLOCKS) {
-            int n = compress_block(src, N, L, dst);
-        //    cout << "compress " << n << endl;
-            src += N * L;
-            dst += n;
+        *dst++ = XBLOCKS;
+        *dst++ = YBLOCKS;
+        
+        int NX = X / XBLOCKS, NY = Y / YBLOCKS;
+        short *buf = new short[NX*NY*L];
+        REP(x, XBLOCKS) {
+            REP(y, YBLOCKS) {
+                REP(i, NX) {
+                    memcpy(buf+i*NY*L, src+((x*NX+i)*Y+y*NY)*L, sizeof(short)*NY*L);
+                }
+                dst += compress_block(buf, NX*NY, L, dst);
+            }
         }
-        if (X % BLOCKS != 0) {
-            dst += compress_block(src, (X % BLOCKS) * Y, L, dst);
-        }
+        delete []buf;
 
         myoutput.myresize((dst - (short*)&myoutput[0]+1)/2);
         VI output;
@@ -826,7 +842,8 @@ public:
         int z = call_try_compress(src, N, L, avg, best, scale, 1);
         if (z==0) {
             scale --;
-            call_try_compress(src, N, L, avg, best, scale, 1);
+            cout << "try " << scale << endl;
+            z = call_try_compress(src, N, L, avg, best, scale, 1);
         }
 
         // output
@@ -907,9 +924,9 @@ public:
         short *src = (short*) &dat[0];
         int X=src[0], Y=src[1], L=src[2];
         src += 3;
-        int BLOCKS = *src++, LAST=0;
-        int N = X/BLOCKS * Y;
-        if (X % BLOCKS != 0) LAST=1;
+        int XBLOCKS = *src++;
+        int YBLOCKS = *src++;
+        int NX = X/XBLOCKS, NY= Y/YBLOCKS;
   //      cout << "block " << BLOCKS << endl;
 
         myvector myoutput((X*Y*L+4)/2);
@@ -917,13 +934,9 @@ public:
         *dst++ = X;
         *dst++ = Y;
         *dst++ = L;
-    
-        REP(b, BLOCKS+LAST) {
-            // last block
-            if (X % BLOCKS != 0 && b == BLOCKS) {
-                N = (X % BLOCKS) * Y;
-            }
-
+        
+        REP(x, XBLOCKS) {
+        REP(y, YBLOCKS) {
             short* avg = src;
 //          cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
             src += L;
@@ -934,25 +947,31 @@ public:
             hm->read(bits);
             hm->buildTree();
 
-            short tmp[64];
-            REP(x, N) {
-                tmp[0] = bits.peek(6) - 32;
-                bits.shift(6);
-                short v = 0;
-                hm->decode(&v, 1, 1, bits);
-                tmp[0] += v * 64;
-                hm->decode(tmp+1, L-1, STEP, bits);
+            short tmp[60];
+            REP(x1, NX) {
+                short *buf = dst + ((x*NX+x1)*Y+y*NY)*L;
+                REP(y1, NY) {
+                    tmp[0] = bits.peek(6) - 32;
+                    bits.shift(6);
+                    short v = 0;
+                    hm->decode(&v, 1, 1, bits);
+                    tmp[0] += v * 64;
+                    hm->decode(tmp+1, L-1, STEP, bits);
                     
-                FOR(i, 1, L) tmp[i] += tmp[i-1];
-                REP(j, L) dst[j] = avg[j] + tmp[j] * SCALE;
-                REP(j, L) if(dst[j] < 0) dst[j] = 0;
-                REP(j, L) if(dst[j] > 16383) dst[j] = 16383;
-                dst += L;
+                    int last = 0;
+                    REP(j, L) {
+                        last += tmp[j];
+                        buf[j] = avg[j] + last * SCALE;
+                        if(buf[j] < 0) buf[j] = 0;
+                        if(buf[j] > 16383) buf[j] = 16383;
+                    }
+                    buf += L;
+                }
             }
+            delete hm;
             bits.rollback();
             src = bits.p; // next block
-            delete hm;
-//            cout << "block size " << (src - avg) << endl;
+        }
         }
 
         VI output;

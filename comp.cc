@@ -2,7 +2,7 @@
 
 int main(int argc, char **argv) {
     test_huffman();
-
+    
     DATCompression2 comp;
 //    cout << (-4 % 64) << " " << (-4 / 64) << endl;
     /*short r[20];
