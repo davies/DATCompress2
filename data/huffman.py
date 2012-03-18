@@ -58,6 +58,83 @@ def _gen_huffman_code(node, dict_codes, buffer_stack=[]):
     _gen_huffman_code(node.R, dict_codes, buffer_stack)
     buffer_stack.pop()
 
+class MyHuffman:
+    def __init__(self):
+        self.freq = {1:{}, 2:{}, 4:{}, 6:{}, 8:{}, 12:{}}
+        self.encoding = {}
+
+    def _update(self, seq, whole=True):
+        n = len(seq)
+        if whole and sum(1 for i in seq if -1<=i<=1) == len(seq) or n==1 and -10<= seq[0] <=10:
+            k = tuple(seq)
+            self.freq[len(seq)][k] = self.freq[len(seq)].get(k, 0) + 1
+            return
+        self.freq[len(seq)]['other'] = self.freq[n].get('other', 0) + 1
+        if n > 1:
+            if n % 3 ==0:
+                self._update(seq[:n/3])
+                self._update(seq[n/3:-n/3])
+                self._update(seq[-n/3:])
+            elif n % 2==0:
+                self._update(seq[:n/2])
+                self._update(seq[n/2:])
+
+    def update(self, seqs):
+        for s in seqs:
+            self._update(s)
+
+    def build(self):
+        for k in reversed(sorted(self.freq)):
+            freq = self.freq[k]
+            if not freq: continue
+            #move
+            if k > 1:
+                n = sum(freq.itervalues())
+                limit = n / (1<<16)
+                for l in freq.keys():
+                    if freq[l] < limit:
+                        self._update(l)
+                        del freq[l]
+
+            root = _build_tree(
+                [HuffmanNode(ch=ch, fq=int(fq)) for ch, fq in self.freq[k].iteritems()]
+                )
+            codemap = {}
+            _gen_huffman_code(root, codemap)
+            self.encoding[k] = codemap
+            for k in sorted(codemap):
+                print k, codemap[k]
+            print
+
+    def guess(self):
+        for s, enc in sorted(self.encoding.iteritems()):
+            n = sum(self.freq[s].itervalues())
+            l = 0.0
+            for k,c in self.freq[s].iteritems():
+                l += c*1.0 / n * len(enc[k])
+            print s, l, len(enc.get('other','')), (self.freq[s].get('other',0))*1.0/n
+
+    def _calc(self, c):
+        n = len(c)
+        if c in self.encoding[n]:
+            return len(self.encoding[n][c])
+        s = len(self.encoding[n]['other'])
+        if n > 1:
+            if n % 3 ==0:
+                s += self._calc(c[:n/3]) + self._calc(c[n/3:-n/3]) + self._calc(c[-n/3:])
+            else: 
+                s += self._calc(c[:n/2]) + self._calc(c[n/2:])
+        else:
+            s += 5
+        return s
+
+    def calc(self, ll):
+        self.update(ll)
+        self.build()
+        self.guess()
+        return sum(self._calc(i) for i in ll)
+            
+
 def _cal_freq(long_str):
     from collections import defaultdict
     d = defaultdict(int)
@@ -88,8 +165,9 @@ class Encoder(object):
         if s:
             self.root = self._get_tree_root()
             self.code_map = self._get_code_map()
-#            for k, v in sorted(self.code_map.items()):
-#                print k,v
+            for k, v in sorted(self.code_map.items()):
+                if len(v) <= 7:
+                    print k,v
             self.array_codes, self.code_length = self._encode()
     long_str = property(__get_long_str, __set_long_str)
     

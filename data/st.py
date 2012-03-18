@@ -2,12 +2,6 @@ import os, sys
 import struct
 import huffman
 
-def smooth(x):
-    y = list(x)
-    for i in range(1, len(x)-1):
-        y[i] = (x[i-1] + x[i+1] + x[i]) / 3
-    return y
-
 def smoothy(pred):        
     for i in range(len(pred)-1):
         if pred[i]+pred[i+1] == 0 and pred[i]*pred[i+1] == -1:
@@ -25,7 +19,7 @@ def frequancy(comp):
 def compress1(data):
     out = []
     size = 0
-    encoding = {-1:'10', 0: '0', 1:'110'}
+    encoding = {-1:'100', 0: '0', 1:'110'}
     for d, in data:
         if d in encoding:
             size += len(encoding[d])
@@ -35,18 +29,18 @@ def compress1(data):
 #            out.append(d > 0 and '1' or '0')
 #            out.append('0' * (abs(d)-2))
 #            out.append('1')
-            size += 4 + abs(d) - 2 + 1
+            size += 2 + abs(d) - 2 + 2
     return size, ''.join(out)
 
 def compress2(data):
     size = 0
     out = []
     encoding = {
-        (-1,0): '1011',
+        (-1,0): '100',
 #        (-1,1): '1010',
-        (0,-1): '100',
+        (0,-1): '101',
         (0,0):  '0',
-        (0,1):  '1100',
+        (0,1):  '110',
 #        (1,-1): '1101',
         (1,0):  '1110',
     }
@@ -61,11 +55,11 @@ def compress2(data):
 
 def two_byte(d1, d2):
     encoding = {
-        (-1,0): '1011',
+        (-1,0): '101',
 #        (-1,1): '1010',
         (0,-1): '100',
         (0,0):  '0',
-        (0,1):  '1100',
+        (0,1):  '110',
 #        (1,-1): '1101',
         (1,0):  '1110',
     }
@@ -95,13 +89,43 @@ def compress4(data):
             size += two_byte(*d[:2]) + two_byte(*d[2:])
     return size, ""
 
+def compress6(data):
+    size = 0
+    out = []
+    encoding = {
+        (0,0,0,0,0,0): '0',
+        (-1,0,0,0,0,0): '10000',
+        (0,-1,0,0,0,0): '10001',
+        (0,0,-1,0,0,0): '10010',
+        (0,0,0,-1,0,0): '101000',
+        (0,0,0,0,-1,0): '101001',
+        (0,0,0,0,0,-1): '101010',
+        (1,0,0,0,0,0):  '111011',
+        (0,1,0,0,0,0):  '111100',
+        (0,0,1,0,0,0):  '111101',
+        (0,0,0,1,0,0):  '111110',
+        (0,0,0,0,1,0):  '111111',
+        (0,0,0,0,0,1):  '10011',
+    }
+    for d in data:
+        if d in encoding:
+            size += len(encoding[d])
+        else:
+            if len(d) == 6:
+                size += 2
+                size += two_byte(*d[:2]) + two_byte(*d[2:4]) + two_byte(*d[4:])
+            else:
+                size += two_byte(*d[:2]) + two_byte(*d[2:4])
+
+    return size, ""
+
 def get_avg(path):
     f = open(path)
     X,Y,L = struct.unpack("H"*3, f.read(6))
     for k in range(1):
         avg = [0] * L
         size = 0
-        for x in range(10):
+        for x in range(30):
             for y in range(Y):
                 d = struct.unpack("H"*L, f.read(L*2))
     #            d = [n-d[0] for n in d]
@@ -119,12 +143,12 @@ def get_avg(path):
 def stat(path):
     avg = get_avg(path)
     
-    N = 16
-    M = 4
+    N = 17
+    M = 12
     f = open(path)
     X,Y,L = struct.unpack("H"*3, f.read(6))
     print path, X, Y, L
-    X = 10
+    X = 30
 #    Y = 10
     diff = 0
     size = 0
@@ -132,6 +156,8 @@ def stat(path):
     davg = [0] * L
     dst = {}
     hst = {}
+
+    huff = huffman.MyHuffman()
     for xx in xrange(X*Y):
         row = struct.unpack("H"*L, f.read(L*2))
         d = [row[i]-avg[i] for i in range(L)]
@@ -143,8 +169,8 @@ def stat(path):
         # TODO: need check before
         smoothy(pred)
         
-        for i in range(L-1):
-            davg[i] += pred[i]
+#        for i in range(L-1):
+#            davg[i] += pred[i]
 
         for i in range(1, L):
             dd[i] = dd[i-1] + pred[i-1]
@@ -165,17 +191,28 @@ def stat(path):
             size += compress1(comp)[0]
         elif M == 4:
             size += compress4(comp)[0]
-
-#        all.extend(comp)
+        elif M==6:
+            size += compress6(comp)[0]
+#        huff.update(comp)
+        all.extend(comp)
 #    davg = [(i+X*Y/2)/X/Y for i in davg]
 #    print davg
 
-    for k in sorted(hst):
-        print k, hst[k] * 100.0 / X / Y
+#    for k in sorted(hst):
+#        print k, hst[k] * 100.0 / X / Y
+
+#    huff.build()
+#    huff.guess()
+    size2 = huff.calc(all)
+    print 'new ', 16 / ((float(size2) / X / Y + 11) / L)
+
+    other = 100.0
     for k in sorted(dst):
         r = dst[k] * 100.0 / X / Y / (L-1)*M
         if r > 1:
+            other -= r
             print k, r
+    print 'other', other
     print diff / (X * Y), 16 / ((float(size) / X / Y + 11) / L)
     
 #    frequancy(comp)
@@ -183,9 +220,9 @@ def stat(path):
 #    enc = huffman.Encoder()
 #    enc.long_str = header
 #    print float(enc.code_length) / len(data)
-    enc = huffman.Encoder()
-    enc.long_str = all
-    print 16 / ((float(enc.code_length) / X /Y + 11) / L)
+    #enc = huffman.Encoder()
+    #enc.long_str = all
+    #print 16 / ((float(enc.code_length) / X /Y + 11) / L)
      
 for p in sys.argv[1:]:
     stat(p)    

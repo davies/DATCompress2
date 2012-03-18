@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <queue>
+#include <assert.h>
 
 using namespace std;
 
@@ -100,7 +102,8 @@ struct Bits {
         p = _p;
     }
     void write(int d, int b) {
-//        cout << "write " << b << " " << d << endl;
+//        cout << "bits write " << b << " " << d << endl;
+        assert((d & (~((1<<b)-1))) == 0);
         d &= (1<<b) - 1;
         data <<= b;
         data |= d;
@@ -132,12 +135,17 @@ struct Bits {
         return r;
     }
     void shift(int b) {
-    //    cout << "shift " << b << endl;
+//        cout << "shift " << b << endl;
         bits -= b;
     }
     int read_bit() {
         int r = peek(1);
         shift(1);
+        return r;
+    }
+    int read(int n) {
+        int r = peek(n);
+        shift(n);
         return r;
     }
     void rollback(void) {
@@ -148,6 +156,419 @@ struct Bits {
         }
     }
 };
+
+#define PII pair<int, int>
+#define MP(x,y) make_pair<int,int>(x,y)
+
+const int NUM_LIMIT = 10;
+const int TREE_NUM = 12;
+const int MAX_SLOTS = 1<<12;
+const int MAX_TREE_SIZE = 81*81*81+1;
+const int SZ[] = {NUM_LIMIT*2+2, 3*3+1, 0, 9*9+1, 0, 27*27+1, 0, 81*81+1, 0, 0, 0, 81*81*81+1};
+const int LUT_SIZE=16;
+int order[MAX_TREE_SIZE*2];
+int parent[MAX_TREE_SIZE];
+    
+int HTCodes[81*81*81*2];
+int HTCodesPos;
+int *HTTree[TREE_NUM];
+int HTData[TREE_NUM][1<<LUT_SIZE];
+
+struct Huffman {
+    int *sizes[TREE_NUM];
+    int osizes[TREE_NUM];
+    int bps[TREE_NUM];
+    int opos[TREE_NUM];
+
+    Huffman() {
+        memset(HTCodes, 0, sizeof(HTCodes));
+        HTCodesPos = 0;
+        memset(HTTree, 0, sizeof(HTTree));
+        memset(HTData, 0, sizeof(HTData));
+        REP(i, TREE_NUM) {
+            osizes[i] = 0;
+            bps[i] = 0;
+            opos[i] = 0;
+            if (SZ[i]==0) {
+                sizes[i] = NULL;
+                continue;
+            }
+//            cout << i << " alloc " << SZ[i] << endl;
+            sizes[i] = new int[SZ[i]];
+            memset(sizes[i], 0, sizeof(int) * SZ[i]);
+        }
+    };
+    ~Huffman() {
+        REP(i, TREE_NUM) if (sizes[i]) {
+            delete []sizes[i];
+            sizes[i] = NULL;
+        }
+    }
+    
+    inline int next_step(int c) {
+        return c % 3==0 ? c/3 : (c % 2==0 ? c/2 : 1);
+    }
+
+    void _add(short *d, int c) {
+        assert(c == 1 || c==2 || c==4 || c==6 || c==8 || c==12);
+        assert(SZ[c-1] > 0);
+        int index = c-1;
+        if (is_valid(d, c)) {
+            int k = gen_key(d, c);
+//            if (k >= SZ[index]-1 || in < 0) {
+//                REP(j, c) cout << d[j] << " "; cout << endl;
+//                cout << "sizes " << (index) << " " << in << endl;
+//            }
+//            if (sizes[index][k] == 0) cout << "_add " << *d << " " << c << endl;
+            sizes[index][k] ++;
+        } else {
+            osizes[index] ++;
+            if (c > 1) {
+                int step = next_step(c);
+                REP(j, c/step) _add(d+j*step, step);
+            }
+        }
+    }
+
+    void add(short *src, int size, int step) {
+        REP(i, size/step) _add(src+i*step, step);
+        src += size / step * step;
+        int left = size % step;
+        if (left) {
+            add(src, left, next_step(step));
+        }
+    }
+
+    int bitCount(int x) {
+        int b=0;
+        while (x > 0) {
+            b++;
+            x >>= 1;
+        }
+        return b;
+    }
+
+    int encodeSize(int x) {
+        if (x < 8) return x;
+        int bc = bitCount(x);
+        return -8 + (bc <<2) + ((x >> (bc-3)) & 3);
+    }
+
+    int decodeSize(int x) {
+        if (x<8) return x;
+        return (4 + (x & 3) ) << ((x >>2) -1);
+    }
+
+    // must call after build
+    void write(Bits &bits) {
+        REP(ii, 12) {
+            if (!SZ[ii]) continue;
+            bits.write(bps[ii], 8);
+            bits.write(opos[ii]&0xffff, 16);
+            bits.write(opos[ii] >> 16, 8);
+            if (opos[ii] ==0) continue;
+            int start=0;
+            while(sizes[ii][start]==0) start ++;
+//            cout << ii << " write freq " << start << " " << bps[ii]  << " " << opos[ii] << endl;
+            bits.write(start & 0xffff, 16);
+            bits.write(start >> 16, 8);
+
+            FOR(j, start, opos[ii]+1) {
+                if (sizes[ii][j] > 0) {
+                    bits.write(1, 1);
+                    bits.write(sizes[ii][j], bps[ii]);
+                } else {
+                    bits.write(0, 1);
+                }
+            }
+        }
+    }
+
+    void read(Bits &bits) {
+        REP(ii, 12) {
+            if (!SZ[ii]) continue;
+            memset(sizes[ii], 0, sizeof(int)*SZ[ii]);
+            bps[ii] = bits.read(8);
+            opos[ii] = bits.read(16);
+            opos[ii] += bits.read(8) << 16;
+            if (opos[ii] ==0) continue;
+            int start = bits.read(16);
+            start += bits.read(8) << 16;
+//            cout << ii << " read freq " << start << " " << bps[ii] << " " << opos[ii] << endl;
+            FOR(j, start, opos[ii]+1) {
+                if (bits.read_bit()) {
+                    sizes[ii][j] = bits.read(bps[ii]);
+//                    cout << j << " " << sizes[ii][j] << endl;
+                }
+            }
+        }
+    }
+
+    void prebuild() {
+        for(int ii=11; ii>=0; ii--) {
+            if (SZ[ii]==0 && sizes[ii] != 0) {
+                cout << ii << " invalid poiter " << sizes[ii]<< endl;
+                continue;
+            }
+            if (SZ[ii]==0) assert(sizes[ii] == NULL);
+            if (sizes[ii] == NULL || SZ[ii]==0) continue;
+
+            int *Size = &sizes[ii][0];
+            int n = osizes[ii];
+            REP(j, SZ[ii]) n += Size[j];
+            int limit = n / MAX_SLOTS;
+//            cout << ii << " " << n << " limit " << limit << endl;
+
+            REP(j, SZ[ii]) if (Size[j] > 0 && Size[j] < limit) {
+                osizes[ii] += Size[j];
+                /*if (ii > 0) {
+                    int step = next_step(ii+1);
+                    int base = 1, k=j;
+                    REP(i, step) base *= 3;
+                    REP(i, (ii+1) / step) {
+                        sizes[step-1][k % base] += Size[j];
+                        k /= base;
+                    }
+                }*/
+                Size[j]=0;
+            }
+            int sizeNo = SZ[ii]-1;
+//            cout << "over " << ii << " " << Size[sizeNo] << " " << SZ[ii] << endl;
+            assert(Size[sizeNo] == 0);
+            while (sizeNo && Size[sizeNo-1] ==0) sizeNo --;
+
+            sizes[ii][sizeNo] = osizes[ii];
+            opos[ii] = sizeNo++;
+            
+            if (sizeNo == 1) continue;
+ //           cout << ii << " have " << sizeNo << endl;
+//            REP(k, sizeNo) cout << Size[k] << " "; cout << endl;
+
+            int maxSize = 0;
+            REP(j, sizeNo) if (Size[j]) {
+                Size[j] = encodeSize(Size[j]);
+                if (Size[j] > maxSize) maxSize = Size[j];
+            }
+            bps[ii] = bitCount(maxSize);
+        }
+    }
+
+    void buildTree() {
+        HTCodesPos = 0;
+        for(int ii=11; ii>=0; ii--) {
+            if (sizes[ii] == NULL) continue;
+            int sizeNo = opos[ii]+1;
+            if (sizeNo == 1) continue;
+            if (sizeNo > MAX_TREE_SIZE) {
+                cout << "too many lines" << sizeNo << endl;
+            }
+            //cout << "sizeNo" << sizeNo << " " << SZ[ii] << endl;
+            
+            int *Size = &sizes[ii][0];
+            priority_queue <PII> pq;
+            REP(j, sizeNo) if (Size[j]) pq.push(MP(-decodeSize(Size[j]), j));
+
+//            cout << "size " << ii << " " << pq.size() << endl;
+            if (pq.size() == 1) {
+                HTTree[ii] = &HTCodes[HTCodesPos];
+                HTTree[ii][pq.top().second] = 1 << 26;
+                int v = (1<<26) + pq.top().second; 
+                REP(j, 1<<LUT_SIZE) HTData[ii][j] = v; 
+                HTCodesPos += sizeNo;
+                continue ;
+            }
+            
+            int orderNo = 0;
+            int pos = MAX_TREE_SIZE;
+            memset(order, 0, sizeof(order));
+            memset(parent, 0, sizeof(parent));
+            while (pq.size() > 1) {
+                PII p1 = pq.top(); pq.pop();
+                PII p2 = pq.top(); pq.pop();
+
+                parent[orderNo>>1] = pos;
+                order[orderNo++] = p1.second;
+                order[orderNo++] = p2.second;
+
+                pq.push(MP(p1.first + p2.first, pos++));
+            }
+
+            HTTree[ii] = &HTCodes[HTCodesPos];
+            HTCodesPos += sizeNo;
+            int *tree = HTTree[ii];
+            memset(tree, 0, sizeof(int)*SZ[ii]);
+            tree[pos-1] = 0;
+
+            orderNo -= 2;
+            for (; orderNo>=0; orderNo -=2) {
+                int p = parent[orderNo >> 1];
+                int x1 = order[orderNo];
+                int x2 = order[orderNo+1];
+                int width = tree[p] >> 26;
+                int base  = tree[p] & 0x3ffffff;
+                if (width+1 > LUT_SIZE) {
+                    cout << "width over flow " << (width+1) << " " << Size[p] << endl;
+                    break;
+                }
+                assert(width+1 <= LUT_SIZE);
+                tree[x1] = ((width+1) << 26) + (base << 1);
+                tree[x2] = ((width+1) << 26) + (base << 1) + 1;
+            }
+
+//            cout << "encoding :" << ii << endl;
+            REP(j, sizeNo) {
+//                if (tree[j] > 0) cout << (j) << " " << Size[j] << " " << (tree[j]>>26) << " " << ((tree[j] & 0x3ffffff)) << endl;
+            }
+
+            memset(HTData[ii], 0, sizeof(HTData[ii]));
+            REP(j, sizeNo) {
+                int v = tree[j];
+                if (v==0) continue;
+                int width = v >> 26;
+                assert(width <= LUT_SIZE);
+                int base = (v << (LUT_SIZE-width)) & 0x3ffffff;
+                int vv = (width << 26) + j;
+//                cout << j << " base " << base << " - " << (base + (1<<(LUT_SIZE-width))) << endl;
+                REP(k, 1<<(LUT_SIZE-width)) {
+                    assert(HTData[ii][base+k] ==0);
+                    HTData[ii][base+k] = vv;
+                }
+            }
+            REP(j, 1<<LUT_SIZE) {
+                if (HTData[j] == 0) {
+                    cout << j << "shoud not 0" << endl;
+                }
+                assert(HTData[j]>0);
+            }
+        }
+    }
+  
+    bool is_valid(short *d, int size) {
+        if (size == 1) {
+            return abs(*d) <= NUM_LIMIT; 
+        }
+        REP(i, size) if (abs(d[i]) > 1) return false;
+        return true;
+    }
+
+    int gen_key(short *d, int size) {
+        if (size == 1) return *d + NUM_LIMIT;
+        int in = 0;
+        REP(i, size) { in *= 3; in += d[i]+1;}
+        assert(in >= 0 && in < SZ[size-1]-1);
+        return in;
+    }
+
+    void decode_key(short *dst, int size, int v) {
+        if (size == 1) {
+            *dst = v - NUM_LIMIT;
+        } else {
+            REP(j, size) {
+                dst[size-j-1] =  v % 3 -1;
+                v /= 3;
+            }
+        }
+    }
+
+    void _encode(short *src, int size, Bits &bits) {
+        int MASK = (1<<26) -1;
+        if (is_valid(src, size)) {
+            int idx = gen_key(src, size);
+            if (idx < opos[size-1] && HTTree[size-1][idx] > 0) {
+//                cout << size << "  _encode " << (HTTree[size-1][idx] >> 26) << " " << idx << 
+  //                  " " << (HTTree[size-1][idx] & MASK) << endl;
+                bits.write(HTTree[size-1][idx] & MASK, HTTree[size-1][idx] >> 26);
+                return;
+            }
+        }
+        
+        int idx = opos[size-1];
+//        cout << "other " << idx << endl;
+        assert(HTTree[size-1][idx] > 0);
+        bits.write(HTTree[size-1][idx] & MASK, HTTree[size-1][idx] >> 26);
+
+        if (size == 1) {
+            bits.write(*src > 0 ? 1 : 0, 1);
+            bits.write(abs(*src), 14); 
+        } else {
+            int step = next_step(size);
+            REP(i, size/step) _encode(src+i*step, step, bits);
+        }
+    }
+    
+    void encode(short *src, int size, int step, Bits &bits) {
+        REP(i, size/step) _encode(src+i*step, step, bits);
+        src += size / step * step;
+        int left = size % step;
+        if (left) {
+            encode(src, left, next_step(step), bits);
+        }
+    }
+
+    void _decode(short *dst, int size, Bits &bits) {
+        assert(size >0);
+        if (!size) return;
+
+        int MASK = (1<<26) -1;
+        int d = bits.peek(LUT_SIZE);
+        int v = HTData[size-1][d];
+        assert(v > 0);
+        int width = v >> 26;
+        v &= MASK;
+//        cout << size << " _decode " << width << " " << v << " " << d << endl;
+        
+        bits.shift(width);
+
+        if (v != opos[size-1]) {
+            decode_key(dst, size, v);
+        } else {
+            if (size == 1) {
+                int flag = bits.read_bit();
+                int d = bits.read(14);
+                *dst = flag ? d : -d;
+            } else {
+                int step = next_step(size);
+                REP(i, size/step) _decode(dst+i*step, step, bits);
+            }
+        }
+    }
+    
+    void decode(short *dst, int size, int step, Bits &bits) {
+        REP(i, size/step) _decode(dst+i*step, step, bits);
+        dst += size / step * step;
+        int left = size % step;
+        if (left) {
+            decode(dst, left, next_step(step), bits);
+        }
+    }
+};
+
+void test_huffman() {
+    const int STEP = 6;
+    Huffman *huffman = new Huffman;
+    short num[30] = {0, 0, -1, -3, 0, 0, 0, 0, 1, 0, 0, 0, -2, -1, 0, 2, 0, 0, 0, 0, 0, 0, 1, 30, 0};
+    huffman->add(num, 30, STEP);
+    huffman->prebuild();
+    huffman->buildTree();
+    
+    short buf[3000];
+    memset(buf, 0, sizeof(buf));
+    Bits bits(buf);
+    huffman->write(bits);
+    huffman->encode(num, 30, STEP, bits);
+    bits.flush();
+//    REP(i, 300) cout << buf[i] << " "; cout << endl;
+    delete huffman;
+
+    short out[30];
+    Bits bits2(buf);
+    Huffman *huffman2 = new Huffman;
+    huffman2->read(bits2);
+    huffman2->buildTree();
+    huffman2->decode(out, 30, STEP, bits2);
+    REP(i, 30) if (out[i] != num[i]) cout << "fail " << i << " " << num[i] << " != " << out[i] << endl;
+    delete huffman2;
+}
 
 const int MAX_BITS = 14;
 
@@ -397,60 +818,74 @@ public:
         short *start = dst;
         REP(i, L) dst[i] = avg[i];
         dst += L;
-
-        *dst++ = scale;
-        bool fourbyte = zero > 0.815 * N * L;
-        *dst ++ = int(fourbyte);
-        //cout << "fourbyte " << fourbyte << endl;
-        struct Bits bits(dst);
+        
+        const int STEP = 8;
+        Huffman *hm = new Huffman;
         short *tmp = best;
         REP(x, N) {
-            // encoding
-            int mod = (tmp[0]+32) % 64, cc = (tmp[0]+32)/64;
+            short mod = (tmp[0]+32) % 64, cc = (tmp[0]+32)/64;
+            if (mod < 0) {
+                cc -= 1;
+            }
+            hm->add(&cc, 1, 1);
+            hm->add(tmp+1, L-1, STEP);
+            tmp += L;
+        }
+
+        hm->prebuild();
+        hm->buildTree();
+
+        *dst++ = scale;
+        *dst++ = STEP;
+        struct Bits bits(dst);
+        hm->write(bits);
+        tmp = best;
+        REP(x, N) {
+            short mod = (tmp[0]+32) % 64, cc = (tmp[0]+32)/64;
             if (mod < 0) {
                 mod += 64;
                 cc -= 1;
             }
             bits.write(mod, 6);
-            encode_byte(cc, bits);
-            
-            if (fourbyte) { 
-                REP(j, (L-1)/4) encode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
-                if ((L-1)%4 > 1) encode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
-            } else {
-                REP(j, (L-1)/2) encode_two_byte(tmp[j*2+1], tmp[j*2+2], bits);
-            }
-            if ((L-1)%2 > 0) encode_byte(tmp[L-1], bits);
-
-            src += L;
+            hm->encode(&cc, 1, 1, bits);
+            hm->encode(tmp+1, L-1, STEP, bits);
             tmp += L;
         }
         bits.flush();
+        int length =  bits.p - start;
 
-        //// test 
-        //{
-        //short *t=best;
-        //struct Bits bits(dst);
-        //int tmp[60];
-        //REP(x, X*Y) {
-        //    tmp[0] = bits.peek(6) - 32;
-        //    bits.shift(6);
-        //    tmp[0] += decode_byte(bits) * 64;
-        //    
-        //    if (fourbyte) {
-        //        REP(j, (L-1)/4) decode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
-        //        if ((L-1)%4 > 1) decode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
-        //    } else {
-        //        REP(i, (L-1)/2) decode_two_byte(tmp[i*2+1], tmp[i*2+2], bits);
-        //    }
+/*        // test 
+        {
+        short *t=best;
+        struct Bits bits(dst);
+        struct Huffman *hm = new Huffman;
+        hm->read(bits);
+        hm->buildTree();
+        short tmp[60];
+        REP(x, 0) {
+            tmp[0] = bits.read(6) - 32;
+            short v = 0;
+            hm->decode(&v, 1, 1, bits);
+            tmp[0] += v * 64;
+            hm->decode(tmp+1, L-1, STEP, bits); 
+            int exit = false;
+            REP(i, L) if (t[i] != tmp[i]) {
+                    cout << x << " " << i << " " << t[i] << " != " << tmp[i] << endl;
+                    REP(k, L) cout << t[k] << " " ; cout << endl;
+                    REP(k, L) cout << tmp[k] << " "; cout << endl;
+                    exit = true;
+                    break;
+                }
+            if (exit) break;
+            t += L;
+        }
+        delete hm;
+        }
+       */
 
-        //    REP(i, L) if (t[i] != tmp[i]) cout << x << " " << i << " " << t[i] << " != " << tmp[i] << endl;
-        //    t += L;
-        //}
-        
+        delete hm;
         delete []best;
-
-        return bits.p - start;
+        return length;
     }
 
     VI decompress(VI &dat) {
@@ -472,30 +907,26 @@ public:
             // last block
             if (X % BLOCKS != 0 && b == BLOCKS) {
                 N = (X % BLOCKS) * Y;
-//                cout << "last block " << N << endl;
             }
 
             short* avg = src;
 //          cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
             src += L;
             int SCALE= *src++;
-            bool fourbyte = *src++;
+            int STEP = *src++;
             struct Bits bits(src);
+            struct Huffman *hm = new Huffman;
+            hm->read(bits);
+            hm->buildTree();
 
- //           cout << "block " << b << " " << SCALE << " " << fourbyte << " " << endl;
-            int tmp[64];
+            short tmp[64];
             REP(x, N) {
                 tmp[0] = bits.peek(6) - 32;
                 bits.shift(6);
-                tmp[0] += decode_byte(bits) * 64;
-                
-                if (fourbyte) {
-                    REP(j, (L-1)/4) decode_byte4(tmp[j*4+1], tmp[j*4+2], tmp[j*4+3], tmp[j*4+4], bits);
-                    if ((L-1)%4 > 1) decode_two_byte(tmp[(L-1)/4*4+1], tmp[(L-1)/4*4+2], bits);
-                } else {
-                    REP(i, (L-1)/2) decode_two_byte(tmp[i*2+1], tmp[i*2+2], bits);
-                }
-                if ((L-1)%2 > 0) tmp[L-1] = decode_byte(bits);
+                short v = 0;
+                hm->decode(&v, 1, 1, bits);
+                tmp[0] += v * 64;
+                hm->decode(tmp+1, L-1, STEP, bits);
                     
                 FOR(i, 1, L) tmp[i] += tmp[i-1];
                 REP(j, L) dst[j] = avg[j] + tmp[j] * SCALE;
