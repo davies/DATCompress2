@@ -10,11 +10,14 @@ test:comp
 ex:comp
 	./comp data/5716a414b41586e046887486ceb0f13d.dat data/2bf3c74ae472ef9b268d6bb89e23db33.dat data/32ea14604c00b6ee878442be5e0d4915.dat data/52909913e796610ffbb8bad2b252c4cd.dat data/62b9d5cff05423698cca681220205134.dat
 
+full:comp
+	./comp data/*.dat
+
 profile:comp
 	sudo opcontrol --reset
 	sudo opcontrol --event=CPU_CLK_UNHALTED:50000
 	sudo opcontrol --start
-	./comp data/C22-169_1600_1000_100.tab
+	./comp data/bcd67c198d66ce35e8ecc4a9a8543280.dat
 	sudo opcontrol --stop
 	sudo opcontrol -h
 

@@ -9,7 +9,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <queue>
-#include <assert.h>
+//#include <assert.h>
+#define assert(x) 
 
 using namespace std;
 
@@ -160,6 +161,7 @@ struct Bits {
 #define PII pair<int, int>
 #define MP(x,y) make_pair<int,int>(x,y)
 
+const int STEP = 6;
 const int NUM_LIMIT = 10;
 const int TREE_NUM = 12;
 const int MAX_SLOTS = 1<<12;
@@ -173,6 +175,9 @@ int HTCodes[81*81*81*2];
 int HTCodesPos;
 int *HTTree[TREE_NUM];
 int HTData[TREE_NUM][1<<LUT_SIZE];
+
+
+#define next_step(step) (step % 3==0 ? step/3 : (step % 2==0 ? step/2 : 1))
 
 struct Huffman {
     int *sizes[TREE_NUM];
@@ -204,17 +209,13 @@ struct Huffman {
             sizes[i] = NULL;
         }
     }
-    
-    inline int next_step(int c) {
-        return c % 3==0 ? c/3 : (c % 2==0 ? c/2 : 1);
-    }
-
-    void _add(short *d, int c) {
-        assert(c == 1 || c==2 || c==4 || c==6 || c==8 || c==12);
-        assert(SZ[c-1] > 0);
-        int index = c-1;
-        if (is_valid(d, c)) {
-            int k = gen_key(d, c);
+   
+    template <int step>
+    void _add(short *d) {
+//        assert(SZ[c-1] > 0);
+        const int index = step-1;
+        if (is_valid<step>(d)) {
+            int k = gen_key<step>(d);
 //            if (k >= SZ[index]-1 || in < 0) {
 //                REP(j, c) cout << d[j] << " "; cout << endl;
 //                cout << "sizes " << (index) << " " << in << endl;
@@ -223,19 +224,20 @@ struct Huffman {
             sizes[index][k] ++;
         } else {
             osizes[index] ++;
-            if (c > 1) {
-                int step = next_step(c);
-                REP(j, c/step) _add(d+j*step, step);
+            if (step > 1) {
+                const int nstep = next_step(step);
+                REP(j, step/nstep) _add<nstep>(d+j*nstep);
             }
         }
     }
 
-    void add(short *src, int size, int step) {
-        REP(i, size/step) _add(src+i*step, step);
+    template <int size, int step>
+    void add(short *src) {
+        REP(i, size/step) _add<step>(src+i*step);
         src += size / step * step;
-        int left = size % step;
+        const int left = size % step;
         if (left) {
-            add(src, left, next_step(step));
+            add<left, next_step(step)>(src);
         }
     }
 
@@ -314,7 +316,6 @@ struct Huffman {
                 cout << ii << " invalid poiter " << sizes[ii]<< endl;
                 continue;
             }
-            if (SZ[ii]==0) assert(sizes[ii] == NULL);
             if (sizes[ii] == NULL || SZ[ii]==0) continue;
 
             int *Size = &sizes[ii][0];
@@ -447,7 +448,8 @@ struct Huffman {
         }
     }
   
-    inline bool is_valid(short *d, int size) {
+    template <int size>
+    inline bool is_valid(short *d) {
         if (size == 1) {
             return -NUM_LIMIT <= *d && *d <= NUM_LIMIT; 
         }
@@ -458,7 +460,8 @@ struct Huffman {
         return true;
     }
 
-    inline int gen_key(short *d, int size) {
+    template <int size>
+    inline int gen_key(short *d) {
         if (size == 1) return *d + NUM_LIMIT;
         int in = 0;
         REP(i, size) { in *= 3; in += d[i]+1;}
@@ -466,7 +469,8 @@ struct Huffman {
         return in;
     }
 
-    inline void decode_key(short *dst, int size, int v) {
+    template <int size>
+    inline void decode_key(short *dst, int v) {
         if (size == 1) {
             *dst = v - NUM_LIMIT;
         } else {
@@ -477,10 +481,11 @@ struct Huffman {
         }
     }
 
-    void _encode(short *src, int size, Bits &bits) {
+    template <int size>
+    void _encode(short *src, Bits &bits) {
         int MASK = (1<<26) -1;
-        if (is_valid(src, size)) {
-            int idx = gen_key(src, size);
+        if (is_valid<size>(src)) {
+            int idx = gen_key<size>(src);
             if (idx < opos[size-1] && HTTree[size-1][idx] > 0) {
 //                cout << size << "  _encode " << (HTTree[size-1][idx] >> 26) << " " << idx << 
   //                  " " << (HTTree[size-1][idx] & MASK) << endl;
@@ -491,30 +496,32 @@ struct Huffman {
         
         int idx = opos[size-1];
 //        cout << "other " << idx << endl;
-        assert(HTTree[size-1][idx] > 0);
+//        assert(HTTree[size-1][idx] > 0);
         bits.write(HTTree[size-1][idx] & MASK, HTTree[size-1][idx] >> 26);
 
         if (size == 1) {
             bits.write(*src > 0 ? 1 : 0, 1);
             bits.write(abs(*src), 14); 
         } else {
-            int step = next_step(size);
-            REP(i, size/step) _encode(src+i*step, step, bits);
+            const int step = next_step(size);
+            REP(i, size/step) _encode<step>(src+i*step, bits);
         }
     }
-    
-    void encode(short *src, int size, int step, Bits &bits) {
-        REP(i, size/step) _encode(src+i*step, step, bits);
+   
+    template <int size, int step>
+    void encode(short *src, Bits &bits) {
+        REP(i, size/step) _encode<step>(src+i*step, bits);
         src += size / step * step;
-        int left = size % step;
+        const int left = size % step;
         if (left) {
-            encode(src, left, next_step(step), bits);
+            encode<left, next_step(step)>(src, bits);
         }
     }
 
-    void _decode(short *dst, int size, Bits &bits) {
-        assert(size >0);
-        if (!size) return;
+    template <int size>
+    void _decode(short *dst, Bits &bits) {
+//        assert(size >0);
+  //      if (!size) return;
 
         int MASK = (1<<26) -1;
         int d = bits.peek(LUT_SIZE);
@@ -527,25 +534,26 @@ struct Huffman {
         bits.shift(width);
 
         if (v != opos[size-1]) {
-            decode_key(dst, size, v);
+            decode_key<size>(dst, v);
         } else {
             if (size == 1) {
                 int flag = bits.read_bit();
                 int d = bits.read(14);
                 *dst = flag ? d : -d;
             } else {
-                int step = next_step(size);
-                REP(i, size/step) _decode(dst+i*step, step, bits);
+                const int step = next_step(size);
+                REP(i, size/step) _decode<step>(dst+i*step, bits);
             }
         }
     }
     
-    void decode(short *dst, int size, int step, Bits &bits) {
-        REP(i, size/step) _decode(dst+i*step, step, bits);
+    template <int size, int step>
+    void decode(short *dst, Bits &bits) {
+        REP(i, size/step) _decode<step>(dst+i*step, bits);
         dst += size / step * step;
-        int left = size % step;
+        const int left = size % step;
         if (left) {
-            decode(dst, left, next_step(step), bits);
+            decode<left, next_step(step)>(dst, bits);
         }
     }
 };
@@ -554,7 +562,7 @@ void test_huffman() {
     const int STEP = 6;
     Huffman *huffman = new Huffman;
     short num[30] = {0, 0, -1, -3, 0, 0, 0, 0, 1, 0, 0, 0, -2, -1, 0, 2, 0, 0, 0, 0, 0, 0, 1, 30, 0};
-    huffman->add(num, 30, STEP);
+    huffman->add<30, STEP>(num);
     huffman->prebuild();
     huffman->buildTree();
     
@@ -562,7 +570,7 @@ void test_huffman() {
     memset(buf, 0, sizeof(buf));
     Bits bits(buf);
     huffman->write(bits);
-    huffman->encode(num, 30, STEP, bits);
+    huffman->encode<30, STEP>(num, bits);
     bits.flush();
 //    REP(i, 300) cout << buf[i] << " "; cout << endl;
     delete huffman;
@@ -572,7 +580,7 @@ void test_huffman() {
     Huffman *huffman2 = new Huffman;
     huffman2->read(bits2);
     huffman2->buildTree();
-    huffman2->decode(out, 30, STEP, bits2);
+    huffman2->decode<30, STEP>(out, bits2);
     REP(i, 30) if (out[i] != num[i]) cout << "fail " << i << " " << num[i] << " != " << out[i] << endl;
     delete huffman2;
 }
@@ -704,8 +712,8 @@ public:
         return df * df;
     }
 
-    template <int SCALE>
-    int try_compress(short *src, int size, int L, int *avg, short *dst, int step) {
+    template <int L, int SCALE>
+    int try_compress(short *src, int size, int *avg, short *dst, int step) {
         int64_t vdiff = 0;
         int zero = 0;
         int half = SCALE/2;
@@ -758,30 +766,17 @@ public:
 //        cout << X << Y << L << " " << SZ(dat) << endl;
         src += 3;
 
-        int XBLOCKS = 9;
-        int YBLOCKS = 9;
-        while (X % XBLOCKS != 0) XBLOCKS --;
-        while (Y % YBLOCKS != 0) YBLOCKS --;
-
         myvector myoutput(SZ(dat)+1000);
         short *dst = (short*)&myoutput[0];
         *dst++ = X;
         *dst++ = Y;
         *dst++ = L;
-        *dst++ = XBLOCKS;
-        *dst++ = YBLOCKS;
-        
-        int NX = X / XBLOCKS, NY = Y / YBLOCKS;
-        short *buf = new short[NX*NY*L];
-        REP(x, XBLOCKS) {
-            REP(y, YBLOCKS) {
-                REP(i, NX) {
-                    memcpy(buf+i*NY*L, src+((x*NX+i)*Y+y*NY)*L, sizeof(short)*NY*L);
-                }
-                dst += compress_block(buf, NX*NY, L, dst);
-            }
+        switch (L) {
+        case 57: dst += doCompress<57>(dst, src, X, Y); break;
+        case 58: dst += doCompress<58>(dst, src, X, Y); break;
+        case 59: dst += doCompress<59>(dst, src, X, Y); break;
+        case 60: dst += doCompress<60>(dst, src, X, Y); break;
         }
-        delete []buf;
 
         myoutput.myresize((dst - (short*)&myoutput[0]+1)/2);
         VI output;
@@ -789,22 +784,49 @@ public:
         return output;
     }
 
-    int call_try_compress(short *src, int N, int L, int *avg, short *buf, int scale, int step) {
+    template <int L>
+    int doCompress(short *dst, short *src, int X, int Y) {
+        int XBLOCKS = 9;
+        int YBLOCKS = 9;
+        while (X % XBLOCKS != 0) XBLOCKS --;
+        while (Y % YBLOCKS != 0) YBLOCKS --;
+        
+        short *start=dst;
+        *dst++ = XBLOCKS;
+        *dst++ = YBLOCKS;
+
+        int NX = X / XBLOCKS, NY = Y / YBLOCKS;
+        short *buf = new short[NX*NY*L];
+        REP(x, XBLOCKS) {
+            REP(y, YBLOCKS) {
+                REP(i, NX) {
+                    memcpy(buf+i*NY*L, src+((x*NX+i)*Y+y*NY)*L, sizeof(short)*NY*L);
+                }
+                dst += compress_block<L>(buf, NX*NY, dst);
+            }
+        }
+        delete []buf;
+        return dst - start;
+    }
+
+    template <int L>
+    int call_try_compress(short *src, int N, int *avg, short *buf, int scale, int step) {
         int z = 0;
         switch (scale) {
-        case 20: z = try_compress<20>(src, N, L, avg, buf, step); break;
-        case 19: z = try_compress<19>(src, N, L, avg, buf, step); break;
-        case 18: z = try_compress<18>(src, N, L, avg, buf, step); break;
-        case 17: z = try_compress<17>(src, N, L, avg, buf, step); break;
-        case 16: z = try_compress<16>(src, N, L, avg, buf, step); break;
-        case 15: z = try_compress<15>(src, N, L, avg, buf, step); break;
-        case 14: z = try_compress<14>(src, N, L, avg, buf, step); break;
-        case 13: z = try_compress<13>(src, N, L, avg, buf, step); break;
+        case 20: z = try_compress<L, 20>(src, N, avg, buf, step); break;
+        case 19: z = try_compress<L, 19>(src, N, avg, buf, step); break;
+        case 18: z = try_compress<L, 18>(src, N, avg, buf, step); break;
+        case 17: z = try_compress<L, 17>(src, N, avg, buf, step); break;
+        case 16: z = try_compress<L, 16>(src, N, avg, buf, step); break;
+        case 15: z = try_compress<L, 15>(src, N, avg, buf, step); break;
+        case 14: z = try_compress<L, 14>(src, N, avg, buf, step); break;
+        case 13: z = try_compress<L, 13>(src, N, avg, buf, step); break;
         }
         return z;
     }
 
-    int compress_block(short *src, int N, int L, short *dst) {
+    template <int L>
+    int compress_block(short *src, int N, short *dst) {
         int avg[60] = {0}, c=N;
         if (c>40000) c = 40000;
         int step = N/c;
@@ -819,7 +841,7 @@ public:
 
         for(int ii=17; ii>12 && ii<21; ii++) {
             if (buf == NULL) buf = new short[N*L];
-            int z = call_try_compress(src, N, L, avg, buf, ii, 16);
+            int z = call_try_compress<L>(src, N, avg, buf, ii, 16);
             //cout << "try " << ii << " " << (float(z)/X/Y/L) << endl; 
             if (z == 0) {
                 if (ii > 18) break;
@@ -839,11 +861,11 @@ public:
         }
         if (buf != NULL) delete []buf;
 
-        int z = call_try_compress(src, N, L, avg, best, scale, 1);
+        int z = call_try_compress<L>(src, N, avg, best, scale, 1);
         if (z==0) {
             scale --;
             cout << "try " << scale << endl;
-            z = call_try_compress(src, N, L, avg, best, scale, 1);
+            z = call_try_compress<L>(src, N, avg, best, scale, 1);
         }
 
         // output
@@ -851,7 +873,7 @@ public:
         REP(i, L) dst[i] = avg[i];
         dst += L;
         
-        const int STEP = 8;
+//        const int STEP = 8;
         Huffman *hm = new Huffman;
         short *tmp = best;
         REP(x, N) {
@@ -859,8 +881,8 @@ public:
             if (mod < 0) {
                 cc -= 1;
             }
-            hm->add(&cc, 1, 1);
-            hm->add(tmp+1, L-1, STEP);
+            hm->add<1, 1>(&cc);
+            hm->add<L-1, STEP>(tmp+1);
             tmp += L;
         }
 
@@ -868,7 +890,7 @@ public:
         hm->buildTree();
 
         *dst++ = scale;
-        *dst++ = STEP;
+//        *dst++ = STEP;
         struct Bits bits(dst);
         hm->write(bits);
         tmp = best;
@@ -879,8 +901,8 @@ public:
                 cc -= 1;
             }
             bits.write(mod, 6);
-            hm->encode(&cc, 1, 1, bits);
-            hm->encode(tmp+1, L-1, STEP, bits);
+            hm->encode<1, 1>(&cc, bits);
+            hm->encode<L-1, STEP>(tmp+1, bits);
             tmp += L;
         }
         bits.flush();
@@ -924,24 +946,39 @@ public:
         short *src = (short*) &dat[0];
         int X=src[0], Y=src[1], L=src[2];
         src += 3;
-        int XBLOCKS = *src++;
-        int YBLOCKS = *src++;
-        int NX = X/XBLOCKS, NY= Y/YBLOCKS;
-  //      cout << "block " << BLOCKS << endl;
 
         myvector myoutput((X*Y*L+4)/2);
         short *dst = (short*)&myoutput[0];
         *dst++ = X;
         *dst++ = Y;
         *dst++ = L;
-        
+
+        switch (L) {
+        case 57: doDecompress<57>(dst, src, X, Y); break;
+        case 58: doDecompress<58>(dst, src, X, Y); break;
+        case 59: doDecompress<59>(dst, src, X, Y); break;
+        case 60: doDecompress<60>(dst, src, X, Y); break;
+        }
+
+        VI output;
+        output.swap(myoutput);
+        return output;
+    }
+    
+    template <int L>
+    void doDecompress(short *dst, short *src, int X, int Y) {
+        int XBLOCKS = *src++;
+        int YBLOCKS = *src++;
+  //      cout << "block " << BLOCKS << endl;
+
+        int NX = X/XBLOCKS, NY= Y/YBLOCKS;
         REP(x, XBLOCKS) {
         REP(y, YBLOCKS) {
             short* avg = src;
 //          cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
             src += L;
             int SCALE= *src++;
-            int STEP = *src++;
+//            int STEP = *src++;
             struct Bits bits(src);
             struct Huffman *hm = new Huffman;
             hm->read(bits);
@@ -954,9 +991,9 @@ public:
                     tmp[0] = bits.peek(6) - 32;
                     bits.shift(6);
                     short v = 0;
-                    hm->decode(&v, 1, 1, bits);
+                    hm->decode<1, 1>(&v, bits);
                     tmp[0] += v * 64;
-                    hm->decode(tmp+1, L-1, STEP, bits);
+                    hm->decode<L-1, STEP>(tmp+1, bits);
                     
                     int last = 0;
                     REP(j, L) {
@@ -973,9 +1010,5 @@ public:
             src = bits.p; // next block
         }
         }
-
-        VI output;
-        output.swap(myoutput);
-        return output;
     }
 };
