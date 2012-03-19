@@ -122,10 +122,11 @@ struct Bits {
 const int TRY_STEP = 1;
 const int STEP = 6;
 const int NUM_LIMIT = 30;
+const int NUM_BITS = 11;
 const int TREE_NUM = 8;
 const int SZ[] = {NUM_LIMIT*2+2, 3*3+1, 0, 9*9+1, 0, 27*27+1, 0, 81*81+1};
 
-const int MAX_SLOTS = 1<<15;
+const int MAX_SLOTS = 1<<14;
 const int MAX_TREE_SIZE = 81*81+1;
 const int LUT_SIZE=16;
 
@@ -447,6 +448,40 @@ struct Huffman {
     }
 
     template <int size>
+    int _calc(short *src) {
+        if (is_valid<size>(src)) {
+            int idx = gen_key<size>(src);
+            if (idx < opos[size-1] && HTTree[size-1][idx] > 0) {
+                return HTTree[size-1][idx] >> 26;
+            }
+        }
+
+        int idx = opos[size-1];
+        assert(HTTree[size-1][idx] > 0);
+        int bits = HTTree[size-1][idx] >> 26;
+
+        if (size == 1) {
+            bits += 1 + 14;
+        } else {
+            const int step = next_step(size);
+            REP(i, size/step) bits += _calc<step>(src+i*step);
+        }
+        return bits;
+    }
+
+    template <int size, int step>
+    int calc(short *src) {
+        int bits = 0;
+        REP(i, size/step) bits += _calc<step>(src+i*step);
+        src += size / step * step;
+        const int left = size % step;
+        if (left) {
+            bits += calc<left, next_step(step)>(src);
+        }
+        return bits;
+    }
+
+    template <int size>
     void _encode(short *src, Bits &bits) {
         int MASK = (1<<26) -1;
         if (is_valid<size>(src)) {
@@ -466,7 +501,7 @@ struct Huffman {
 
         if (size == 1) {
             bits.write(*src > 0 ? 1 : 0, 1);
-            bits.write(abs(*src), 14); 
+            bits.write(abs(*src), NUM_BITS); 
         } else {
             const int step = next_step(size);
             REP(i, size/step) _encode<step>(src+i*step, bits);
@@ -503,7 +538,7 @@ struct Huffman {
         } else {
             if (size == 1) {
                 int flag = bits.read_bit();
-                int d = bits.read(14);
+                int d = bits.read(NUM_BITS);
                 *dst = flag ? d : -d;
             } else {
                 const int step = next_step(size);
@@ -553,7 +588,7 @@ void test_huffman() {
 class DATCompression2 {
 public:
     inline int calc_diff(short v, short ov) {
-//        if (v < 0) v=0; if (v>16383) v=16383;
+        if (v < 0) v=0; if (v>16383) v=16383;
         int df = (v - ov);
         return df * df;
     }
@@ -719,29 +754,48 @@ public:
             }
         }
 
-        // output
-        short *start = dst;
-        REP(i, L) dst[i] = avg[i];
-        dst += L;
-        
 //        const int STEP = 8;
         Huffman *hm = new Huffman;
+//        Huffman *hm8 = new Huffman;
         short *tmp = best;
         REP(x, N) {
             short mod = (tmp[0]+32) % 64, cc = (tmp[0]+32)/64;
-            if (mod < 0) {
-                cc -= 1;
-            }
+            if (mod < 0) cc -= 1;
             hm->add<1, 1>(&cc);
             hm->add<L-1, STEP>(tmp+1);
+//            hm8->add<1, 1>(&cc);
+//            hm8->add<L-1, 8>(tmp+1);
             tmp += L;
         }
 
         hm->prebuild();
         hm->buildTree();
+//        hm8->prebuild();
+//        hm8->buildTree();
+        
+//        tmp = best;
+//        int bit6=0, bit8=0;
+//        REP(x, N) {
+//            short mod = (tmp[0]+32) % 64, cc = (tmp[0]+32)/64;
+//            if (mod < 0) cc -= 1;
+//            bit6 += hm6->calc<1, 1>(&cc);
+//            bit8 += hm8->calc<1, 1>(&cc);
+//            bit6 += hm6->calc<L-1, 6>(tmp+1);
+//            bit8 += hm8->calc<L-1, 8>(tmp+1);
+//            tmp += L;
+//        }
+//        bit8 = 1;
+//        //int nbits = bit6 < bit8 ? bit6 : bit8;
+//        cout << "diff " << float(bit8-bit6)*100/bit6 << endl;
 
+        // output
+        short *start = dst;
+        *dst++ = STEP;
+//        *dst++ = bit6 < bit8 ? 6 : 8;
+        REP(i, L) dst[i] = avg[i];
+        dst += L;
+        
         *dst++ = scale;
-//        *dst++ = STEP;
         struct Bits bits(dst);
         hm->write(bits);
         tmp = best;
@@ -754,6 +808,10 @@ public:
             bits.write(mod, 6);
             hm->encode<1, 1>(&cc, bits);
             hm->encode<L-1, STEP>(tmp+1, bits);
+//            if (bit6 < bit8) 
+//                hm->encode<L-1, 6>(tmp+1, bits);
+//            else
+//                hm->encode<L-1, 8>(tmp+1, bits);
             tmp += L;
         }
         bits.flush();
@@ -789,6 +847,7 @@ public:
        */
 
         delete hm;
+//        delete hm8;
         delete []best;
         return length;
     }
@@ -805,19 +864,19 @@ public:
         *dst++ = L;
 
         switch (L) {
-        case 55: doDecompress<55>(dst, src, X, Y); break;
-        case 56: doDecompress<56>(dst, src, X, Y); break;
+//        case 55: doDecompress<55>(dst, src, X, Y); break;
+//        case 56: doDecompress<56>(dst, src, X, Y); break;
         case 57: doDecompress<57>(dst, src, X, Y); break;
-        case 58: doDecompress<58>(dst, src, X, Y); break;
+//        case 58: doDecompress<58>(dst, src, X, Y); break;
         case 59: doDecompress<59>(dst, src, X, Y); break;
-        case 60: doDecompress<60>(dst, src, X, Y); break;
+//        case 60: doDecompress<60>(dst, src, X, Y); break;
         }
 
         VI output;
         output.swap(myoutput);
         return output;
     }
-    
+   
     template <int L>
     void doDecompress(short *dst, short *src, int X, int Y) {
         int XBLOCKS = *src++;
@@ -827,41 +886,54 @@ public:
         int NX = X/XBLOCKS, NY= Y/YBLOCKS;
         REP(x, XBLOCKS) {
         REP(y, YBLOCKS) {
-            short* avg = src;
-//          cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
-            src += L;
-            int SCALE= *src++;
-//            int STEP = *src++;
-            struct Bits bits(src);
-            struct Huffman *hm = new Huffman;
-            hm->read(bits);
-            hm->buildTree();
-
-            short tmp[60];
-            REP(x1, NX) {
-                short *buf = dst + ((x*NX+x1)*Y+y*NY)*L;
-                REP(y1, NY) {
-                    tmp[0] = bits.peek(6) - 32;
-                    bits.shift(6);
-                    short v = 0;
-                    hm->decode<1, 1>(&v, bits);
-                    tmp[0] += v * 64;
-                    hm->decode<L-1, STEP>(tmp+1, bits);
-                    
-                    int last = 0;
-                    REP(j, L) {
-                        last += tmp[j];
-                        buf[j] = avg[j] + last * SCALE;
-                        if(buf[j] < 0) buf[j] = 0;
-                        if(buf[j] > 16383) buf[j] = 16383;
-                    }
-                    buf += L;
-                }
+            int step = *src++;
+            switch (step) {
+            case 8: src += decompress_block<L, 8>(src, dst, x, y, NX, NY, Y); break;
+            case 6: src += decompress_block<L, 6>(src, dst, x, y, NX, NY, Y); break;
+//            case 4: src += decompress_block<L, 4>(src, dst, x, y, NX, NY, Y); break;
+//            case 3: src += decompress_block<L, 3>(src, dst, x, y, NX, NY, Y); break;
+//            case 2: src += decompress_block<L, 2>(src, dst, x, y, NX, NY, Y); break;
+//            case 1: src += decompress_block<L, 1>(src, dst, x, y, NX, NY, Y); break;
             }
-            delete hm;
-            bits.rollback();
-            src = bits.p; // next block
         }
         }
+    }
+
+    template <int L, int STEP>
+    int decompress_block(short *src, short *dst, int x, int y, int NX, int NY, int Y) {
+        short* avg = src;
+//          cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
+        src += L;
+        int SCALE= *src++;
+        struct Bits bits(src);
+        struct Huffman *hm = new Huffman;
+        hm->read(bits);
+        hm->buildTree();
+
+        short tmp[60];
+        REP(x1, NX) {
+            short *buf = dst + ((x*NX+x1)*Y+y*NY)*L;
+            REP(y1, NY) {
+                tmp[0] = bits.peek(6) - 32;
+                bits.shift(6);
+                short v = 0;
+                hm->decode<1, 1>(&v, bits);
+                tmp[0] += v * 64;
+                hm->decode<L-1, STEP>(tmp+1, bits);
+                
+                int last = 0;
+                REP(j, L) {
+                    last += tmp[j];
+                    buf[j] = avg[j] + last * SCALE;
+                    if(buf[j] < 0) buf[j] = 0;
+                    if(buf[j] > 16383) buf[j] = 16383;
+                }
+                buf += L;
+            }
+        }
+        delete hm;
+        bits.rollback();
+        src = bits.p; // next block
+        return src - avg;
     }
 };
