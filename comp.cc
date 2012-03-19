@@ -4,57 +4,6 @@ int main(int argc, char **argv) {
     test_huffman();
     
     DATCompression2 comp;
-//    cout << (-4 % 64) << " " << (-4 / 64) << endl;
-    /*short r[20];
-    int rr[20];
-    int t[] = {0,-1,1, 2,-3, 0, 5,-6,-1, 0};
-    Bits bits(r);
-    REP(i, 10) cout << t[i] << " "; cout << endl;
-    REP(i, 10) comp.encode_byte(t[i], bits);
-    bits.flush();
-    REP(i, 10) cout << r[i] << " "; cout << endl;
-    Bits bits2(r);
-    REP(i, 10) rr[i] = comp.decode_byte(bits2);
-    REP(i, 10) cout << rr[i] << " "; cout << endl;*/
-    //
-    FOR(i, -30, 30) {
-        short buf[20];
-        Bits writer(buf);
-        comp.encode_byte(i, writer);
-        writer.flush();
-        Bits reader(buf);
-        int x = comp.decode_byte(reader);
-        if (x!=i) {
-            printf("failed %d %d\n", i,x);
-        }
-        FOR(j, -3, 3) {
-            if (i+j == 0 && i*j == -1) continue;
-            short buf[20];
-            Bits writer(buf);
-            comp.encode_two_byte(i, j, writer);
-            writer.flush();
-            Bits reader(buf);
-            int x,y;
-            comp.decode_two_byte(x, y, reader);
-            if (x!=i || y!=j) {
-                printf("failed %d %d %d %d\n", i, j, x, y);
-            }
-            FOR(k, -1, 2) {
-                FOR(l, -1, 2) {
-                    if (k+l == 0 && k*l == -1) continue;
-                    short buf[20];
-                    Bits writer(buf), reader(buf);
-                    comp.encode_byte4(i, j, k, l, writer);
-                    writer.flush();
-                    int x,y,z,w;
-                    comp.decode_byte4(x, y, z, w, reader);
-                    if (x!=i || y!=j || k!=z || l!=w) {
-                        printf("failed %d %d %d %d %d %d %d %d\n", i, j, k, l, x, y, z, w);
-                    }
-                }
-            }
-        }
-    }
     
     float total = 0;
     int valid=0;

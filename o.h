@@ -546,6 +546,12 @@ void test_huffman() {
 
 class DATCompression2 {
 public:
+    inline int calc_diff(short v, short ov) {
+//        if (v < 0) v=0; if (v>16383) v=16383;
+        int df = (v - ov);
+        return df * df;
+    }
+
     template <int L, int SCALE>
     int try_compress(short *src, int size, int *avg, short *dst, int step) {
         int64_t vdiff = 0;
