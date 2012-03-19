@@ -41,6 +41,8 @@ public:
 #define REP(i,n) FOR(i,0,n)
 #define SZ(v) ((int)(v).size())
 #define DV(v) REP(_i,SZ(v)) cerr << v[_i] << " "; cerr << endl
+#define PII pair<int, int>
+#define MP(x,y) make_pair<int,int>(x,y)
 
 #ifdef USE_EXPECT
 #define likely(x)    __builtin_expect((x), 1)
@@ -158,24 +160,21 @@ struct Bits {
     }
 };
 
-#define PII pair<int, int>
-#define MP(x,y) make_pair<int,int>(x,y)
-
+const int TRY_STEP = 3;
 const int STEP = 6;
-const int NUM_LIMIT = 10;
-const int TREE_NUM = 12;
-const int MAX_SLOTS = 1<<12;
-const int MAX_TREE_SIZE = 81*81*81+1;
-const int SZ[] = {NUM_LIMIT*2+2, 3*3+1, 0, 9*9+1, 0, 27*27+1, 0, 81*81+1, 0, 0, 0, 81*81*81+1};
+const int NUM_LIMIT = 30;
+const int TREE_NUM = 8;
+const int MAX_SLOTS = 1<<15;
+const int MAX_TREE_SIZE = 81*81+1;
+const int SZ[] = {NUM_LIMIT*2+2, 3*3+1, 0, 9*9+1, 0, 27*27+1, 0, 81*81+1};
 const int LUT_SIZE=16;
 int order[MAX_TREE_SIZE*2];
 int parent[MAX_TREE_SIZE];
     
-int HTCodes[81*81*81*2];
+int HTCodes[MAX_TREE_SIZE*3];
 int HTCodesPos;
 int *HTTree[TREE_NUM];
 int HTData[TREE_NUM][1<<LUT_SIZE];
-
 
 #define next_step(step) (step % 3==0 ? step/3 : (step % 2==0 ? step/2 : 1))
 
@@ -258,12 +257,15 @@ struct Huffman {
 
     inline int decodeSize(int x) {
         if (x<8) return x;
-        return (4 + (x & 3) ) << ((x >>2) -1);
+        int bc = (x >>2) + 2;
+        int v = (4 + (x & 3) ) << (bc -3);
+//        if (bc >= 5) v += 1 << (bc-5);
+        return v;
     }
 
     // must call after build
     void write(Bits &bits) {
-        REP(ii, 12) {
+        REP(ii, TREE_NUM) {
             if (!SZ[ii]) continue;
             bits.write(bps[ii], 8);
             bits.write(opos[ii]&0xffff, 16);
@@ -291,7 +293,7 @@ struct Huffman {
     }
 
     void read(Bits &bits) {
-        REP(ii, 12) {
+        REP(ii, TREE_NUM) {
             if (!SZ[ii]) continue;
             memset(sizes[ii], 0, sizeof(int)*SZ[ii]);
             bps[ii] = bits.read(8);
@@ -311,7 +313,7 @@ struct Huffman {
     }
 
     void prebuild() {
-        for(int ii=11; ii>=0; ii--) {
+        for(int ii=TREE_NUM-1; ii>=0; ii--) {
             if (SZ[ii]==0 && sizes[ii] != 0) {
                 cout << ii << " invalid poiter " << sizes[ii]<< endl;
                 continue;
@@ -360,7 +362,7 @@ struct Huffman {
 
     void buildTree() {
         HTCodesPos = 0;
-        for(int ii=11; ii>=0; ii--) {
+        for(int ii=TREE_NUM-1; ii>=0; ii--) {
             if (sizes[ii] == NULL) continue;
             int sizeNo = opos[ii]+1;
             if (sizeNo == 1) continue;
@@ -844,7 +846,7 @@ public:
 
         for(int ii=17; ii>12 && ii<21; ii++) {
             if (buf == NULL) buf = new short[N*L];
-            int z = call_try_compress<L>(src, N, avg, buf, ii, 16);
+            int z = call_try_compress<L>(src, N, avg, buf, ii, TRY_STEP);
             //cout << "try " << ii << " " << (float(z)/X/Y/L) << endl; 
             if (z == 0) {
                 if (ii > 18) break;
@@ -864,11 +866,11 @@ public:
         }
         if (buf != NULL) delete []buf;
 
-        int z = call_try_compress<L>(src, N, avg, best, scale, 1);
-        if (z==0) {
+        zero = call_try_compress<L>(src, N, avg, best, scale, 1);
+        if (zero == 0) {
             scale --;
             cout << "try " << scale << endl;
-            z = call_try_compress<L>(src, N, avg, best, scale, 1);
+            zero = call_try_compress<L>(src, N, avg, best, scale, 1);
         }
 
         // output
