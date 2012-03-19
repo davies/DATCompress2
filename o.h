@@ -9,8 +9,9 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <queue>
-//#include <assert.h>
-#define assert(x) 
+#include <assert.h>
+
+//#define assert(x) 
 
 using namespace std;
 
@@ -63,6 +64,7 @@ struct Bits {
     }
     void write(int d, int b) {
 //        cout << "bits write " << b << " " << d << endl;
+        assert(b > 0 && b <= 16);
         assert((d & (~((1<<b)-1))) == 0);
         d &= (1<<b) - 1;
         data <<= b;
@@ -117,21 +119,15 @@ struct Bits {
     }
 };
 
-const int TRY_STEP = 3;
+const int TRY_STEP = 1;
 const int STEP = 6;
 const int NUM_LIMIT = 30;
 const int TREE_NUM = 8;
+const int SZ[] = {NUM_LIMIT*2+2, 3*3+1, 0, 9*9+1, 0, 27*27+1, 0, 81*81+1};
+
 const int MAX_SLOTS = 1<<15;
 const int MAX_TREE_SIZE = 81*81+1;
-const int SZ[] = {NUM_LIMIT*2+2, 3*3+1, 0, 9*9+1, 0, 27*27+1, 0, 81*81+1};
 const int LUT_SIZE=16;
-int order[MAX_TREE_SIZE*2];
-int parent[MAX_TREE_SIZE];
-    
-int HTCodes[MAX_TREE_SIZE*3];
-int HTCodesPos;
-int *HTTree[TREE_NUM];
-int HTData[TREE_NUM][1<<LUT_SIZE];
 
 #define next_step(step) (step % 3==0 ? step/3 : (step % 2==0 ? step/2 : 1))
 
@@ -140,6 +136,14 @@ struct Huffman {
     int osizes[TREE_NUM];
     int bps[TREE_NUM];
     int opos[TREE_NUM];
+    
+    int order[MAX_TREE_SIZE*2];
+    int parent[MAX_TREE_SIZE];
+        
+    int HTCodes[MAX_TREE_SIZE*3];
+    int HTCodesPos;
+    int *HTTree[TREE_NUM];
+    int HTData[TREE_NUM][1<<LUT_SIZE];
 
     Huffman() {
         memset(HTCodes, 0, sizeof(HTCodes));
@@ -371,10 +375,12 @@ struct Huffman {
                 int width = tree[p] >> 26;
                 int base  = tree[p] & 0x3ffffff;
                 if (width+1 > LUT_SIZE) {
-                    cout << "width over flow " << (width+1) << " " << Size[p] << endl;
+//                    cout << "width over flow " << (width+1) << " " << endl;
+                    if (tree[opos[ii]] == 0) {
+                        tree[opos[ii]] = tree[p];
+                    }
                     break;
                 }
-                assert(width+1 <= LUT_SIZE);
                 tree[x1] = ((width+1) << 26) + (base << 1);
                 tree[x2] = ((width+1) << 26) + (base << 1) + 1;
             }
@@ -399,10 +405,10 @@ struct Huffman {
                 }
             }
             REP(j, 1<<LUT_SIZE) {
-                if (HTData[j] == 0) {
+                if (HTData[ii][j] == 0) {
                     cout << j << "shoud not 0" << endl;
                 }
-                assert(HTData[j]>0);
+                assert(HTData[ii][j]>0);
             }
         }
     }
@@ -704,11 +710,13 @@ public:
         }
         if (buf != NULL) delete []buf;
 
-        zero = call_try_compress<L>(src, N, avg, best, scale, 1);
-        if (zero == 0) {
-            scale --;
-            cout << "try " << scale << endl;
+        if (TRY_STEP > 1) {
             zero = call_try_compress<L>(src, N, avg, best, scale, 1);
+            if (zero == 0) {
+                scale --;
+                cout << "try " << scale << endl;
+                zero = call_try_compress<L>(src, N, avg, best, scale, 1);
+            }
         }
 
         // output
