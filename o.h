@@ -771,7 +771,10 @@ public:
         *dst++ = X;
         *dst++ = Y;
         *dst++ = L;
+
         switch (L) {
+        case 55: dst += doCompress<55>(dst, src, X, Y); break;
+        case 56: dst += doCompress<56>(dst, src, X, Y); break;
         case 57: dst += doCompress<57>(dst, src, X, Y); break;
         case 58: dst += doCompress<58>(dst, src, X, Y); break;
         case 59: dst += doCompress<59>(dst, src, X, Y); break;
@@ -954,6 +957,8 @@ public:
         *dst++ = L;
 
         switch (L) {
+        case 55: doDecompress<55>(dst, src, X, Y); break;
+        case 56: doDecompress<56>(dst, src, X, Y); break;
         case 57: doDecompress<57>(dst, src, X, Y); break;
         case 58: doDecompress<58>(dst, src, X, Y); break;
         case 59: doDecompress<59>(dst, src, X, Y); break;
