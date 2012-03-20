@@ -1,3 +1,5 @@
+//#define KEEP_HALF
+
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -119,7 +121,7 @@ struct Bits {
     }
 };
 
-const int TRY_STEP = 1;
+const int TRY_STEP = 7;
 const int STEP = 6;
 const int NUM_LIMIT = 30;
 const int NUM_BITS = 11;
@@ -609,10 +611,15 @@ public:
             if (vdiff < 36*x*L-2000) {
                 for(int j=L-1;j>0;j--) {
                     short d = tmp[j] - tmp[j-1];
-                    if (d != 0 && d+prev==0 && d * prev==-1) {
-                        d = 0;
-                        dst[j+1] = 0;
-                        zero ++;
+                    if (d * prev < 0) {
+                        if (d < 0) {
+                            d ++;
+                            dst[j+1] --;
+                        } else {
+                            d --;
+                            dst[j+1] ++;
+                        }
+                        if (dst[j+1]==0) zero ++;
                     }
                     if (d==0) zero ++;
                     vdiff += calc_diff((tmp[j-1]+d) * SCALE + avg[j], src[j]);
@@ -662,7 +669,11 @@ public:
         case 60: dst += doCompress<60>(dst, src, X, Y); break;
         }
 
+#ifdef KEEP_HALF
+        myoutput.myresize((dst - (short*)&myoutput[0]+1));
+#else
         myoutput.myresize((dst - (short*)&myoutput[0]+1)/2);
+#endif
         VI output;
         output.swap(myoutput);
         return output;
