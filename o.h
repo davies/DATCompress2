@@ -122,17 +122,19 @@ struct Bits {
 };
 
 const int TRY_STEP = 7;
-const int STEP = 6;
+const int STEP = 8;
 const int NUM_LIMIT = 30;
 const int NUM_BITS = 11;
+const int NUM_LIMIT2 = 3;
+const int NUM_SIZE2 = NUM_LIMIT2*2+1;
 const int TREE_NUM = 8;
-const int SZ[] = {NUM_LIMIT*2+2, 3*3+1, 0, 9*9+1, 0, 27*27+1, 0, 81*81+1};
+const int SZ[] = {NUM_LIMIT*2+2, NUM_SIZE2*NUM_SIZE2+1, 0, 9*9+1, 0, 27*27+1, 0, 81*81+1};
 
-const int MAX_SLOTS = 1<<14;
+const int MAX_SLOTS = 1<<12;
 const int MAX_TREE_SIZE = 81*81+1;
 const int LUT_SIZE=16;
 
-#define next_step(step) (step % 3==0 ? step/3 : (step % 2==0 ? step/2 : 1))
+#define next_step(step) ((step) % 3==0 ? (step)/3 : ((step) % 2==0 ? (step)/2 : 1))
 
 struct Huffman {
     int *sizes[TREE_NUM];
@@ -183,7 +185,7 @@ struct Huffman {
 //                REP(j, c) cout << d[j] << " "; cout << endl;
 //                cout << "sizes " << (index) << " " << in << endl;
 //            }
-//            if (sizes[index][k] == 0) cout << "_add " << *d << " " << c << endl;
+//            if (step==2 && sizes[index][k] == 0) printf("add %d %d %d \n", step, d[0], d[1]);
             sizes[index][k] ++;
         } else {
             osizes[index] ++;
@@ -292,15 +294,24 @@ struct Huffman {
 
             REP(j, SZ[ii]) if (Size[j] > 0 && Size[j] < limit) {
                 osizes[ii] += Size[j];
-                /*if (ii > 0) {
+                if (ii > 0) {
                     int step = next_step(ii+1);
-                    int base = 1, k=j;
-                    REP(i, step) base *= 3;
-                    REP(i, (ii+1) / step) {
-                        sizes[step-1][k % base] += Size[j];
-                        k /= base;
+                    short v[8];
+                    switch (ii+1) {
+                    case 8: decode_key<8>(v, j); break;
+                    case 6: decode_key<6>(v, j); break;
+                    case 4: decode_key<4>(v, j); break;
+                    case 2: decode_key<2>(v, j); break;
                     }
-                }*/
+                    //cout << "down to "<< step << " "; REP(i, ii+1) cout << v[i] << " " ; cout << endl;
+                    REP(i, (ii+1)/step) {
+                        switch (step) {
+                        case 4: sizes[step-1][gen_key<4>(v+i*step)] += Size[j]; break;
+                        case 2: sizes[step-1][gen_key<2>(v+i*step)] += Size[j]; break; 
+                        case 1: sizes[step-1][gen_key<1>(v+i*step)] += Size[j]; break;
+                        }
+                    }
+                }
                 Size[j]=0;
             }
             int sizeNo = SZ[ii]-1;
@@ -378,7 +389,7 @@ struct Huffman {
                 int width = tree[p] >> 26;
                 int base  = tree[p] & 0x3ffffff;
                 if (width+1 > LUT_SIZE) {
-//                    cout << "width over flow " << (width+1) << " " << endl;
+                    cout << "width over flow " << (width+1) << " " << endl;
                     if (tree[opos[ii]] == 0) {
                         tree[opos[ii]] = tree[p];
                     }
@@ -387,7 +398,7 @@ struct Huffman {
                 tree[x1] = ((width+1) << 26) + (base << 1);
                 tree[x2] = ((width+1) << 26) + (base << 1) + 1;
             }
-
+//            cout << ii << " " << tree[opos[ii]] << " " << Size[opos[ii]] << endl;
 //            cout << "encoding :" << ii << endl;
             REP(j, sizeNo) {
 //                if (tree[j] > 0) cout << (j) << " " << Size[j] << " " << (tree[j]>>26) << " " << ((tree[j] & 0x3ffffff)) << endl;
@@ -409,9 +420,9 @@ struct Huffman {
             }
             REP(j, 1<<LUT_SIZE) {
                 if (HTData[ii][j] == 0) {
-                    cout << j << "shoud not 0" << endl;
+                    cout << j << " shoud not 0" << endl;
                 }
-                assert(HTData[ii][j]>0);
+//                assert(HTData[ii][j]>0);
             }
         }
     }
@@ -420,6 +431,9 @@ struct Huffman {
     inline bool is_valid(short *d) {
         if (size == 1) {
             return -NUM_LIMIT <= *d && *d <= NUM_LIMIT; 
+        }
+        if (size == 2) {
+            return -NUM_LIMIT2 <= d[0] && d[0] <= NUM_LIMIT2 && -NUM_LIMIT2 <= d[1] && d[1] <= NUM_LIMIT2;
         }
         for(int i=0; i<size-1; i+= 2) {
             if (d[i] > 1 || d[i] < -1) return false;
@@ -431,6 +445,7 @@ struct Huffman {
     template <int size>
     inline int gen_key(short *d) {
         if (size == 1) return *d + NUM_LIMIT;
+        if (size == 2) return (d[0] + NUM_LIMIT2) * NUM_SIZE2 + d[1] + NUM_LIMIT2;
         int in = 0;
         REP(i, size) { in *= 3; in += d[i]+1;}
         assert(in >= 0 && in < SZ[size-1]-1);
@@ -441,6 +456,9 @@ struct Huffman {
     inline void decode_key(short *dst, int v) {
         if (size == 1) {
             *dst = v - NUM_LIMIT;
+        } else if (size==2) {
+            dst[0] = v / NUM_SIZE2 - NUM_LIMIT2;
+            dst[1] = v % NUM_SIZE2 - NUM_LIMIT2;
         } else {
             REP(j, size) {
                 dst[size-j-1] =  v % 3 -1;
@@ -498,7 +516,10 @@ struct Huffman {
         
         int idx = opos[size-1];
 //        cout << "other " << idx << endl;
-//        assert(HTTree[size-1][idx] > 0);
+        if (HTTree[size-1][idx] ==0) {
+            printf("wrong %d %d %d\n", size, src[0], src[1]);
+        }
+        assert(HTTree[size-1][idx] > 0);
         bits.write(HTTree[size-1][idx] & MASK, HTTree[size-1][idx] >> 26);
 
         if (size == 1) {
@@ -561,7 +582,7 @@ struct Huffman {
 };
 
 void test_huffman() {
-    const int STEP = 6;
+    const int STEP = 2;
     Huffman *huffman = new Huffman;
     short num[30] = {0, 0, -1, -3, 0, 0, 0, 0, 1, 0, 0, 0, -2, -1, 0, 2, 0, 0, 0, 0, 0, 0, 1, 30, 0};
     huffman->add<30, STEP>(num);
