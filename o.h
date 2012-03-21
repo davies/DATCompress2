@@ -621,6 +621,7 @@ public:
         int64_t vdiff = 0;
         int zero = 0;
         int half = SCALE/2;
+        short *old_src = src, *old_dst = dst;
         size /= step;
         REP(x, size) {
             short *tmp = dst;
@@ -665,7 +666,37 @@ public:
             src += L*step;
             dst += L;
         }
-        if (vdiff >= 36 * size  * L) zero = 0;
+
+        int limit = 36 * size  * L;
+        if (vdiff >= limit) zero = 0;
+
+        int mdf = SCALE * SCALE;
+        src = old_src;
+        dst = old_dst;
+        int ones = 0;
+        REP(x, size) {
+            int last=dst[0];
+            for(int i=1; i<L-1; i+=2) {
+                int s = dst[i]+dst[i+1];
+                if (dst[i]*dst[i+1]==0 && abs(s) == 1 && dst[i+1]==0) {
+                    int df = calc_diff(last*SCALE+avg[i], src[i]);
+                    if (df < mdf) {
+                        int odf = calc_diff((last+dst[i])*SCALE + avg[i], src[i]);
+                        if (vdiff + df - odf < limit) {
+                            dst[i+1] = dst[i];
+                            dst[i] = 0;
+                            vdiff += df - odf;
+                            ones ++;
+                        }
+                    }
+                }
+                last += s;
+            }
+            if (vdiff > limit - mdf/2) break;
+            src += L*step;
+            dst += L;
+        }
+        zero += ones / 4;
         return zero;
     }
 
