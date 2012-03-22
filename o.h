@@ -1001,7 +1001,7 @@ public:
 //        cout << X << Y << L << " " << SZ(dat) << endl;
         src += 3;
 
-        myvector myoutput(SZ(dat)+1000);
+        myvector myoutput(SZ(dat)*2+1000);
         short *dst = (short*)&myoutput[0];
         *dst++ = X;
         *dst++ = Y;
@@ -1032,7 +1032,8 @@ public:
         int YBLOCKS = 9;
         while (X % XBLOCKS != 0) XBLOCKS --;
         while (Y % YBLOCKS != 0) YBLOCKS --;
-        
+//        cout << "BLOCKS " << XBLOCKS << " " << YBLOCKS << endl;    
+
         short *start=dst;
         *dst++ = XBLOCKS;
         *dst++ = YBLOCKS;
@@ -1112,27 +1113,42 @@ public:
             }
         }
 
-        // try to ar
-        int used = 0;
-        {
-        struct Bits w(dst);
+        // output
+        short *start = dst;
+        REP(i, L) dst[i] = avg[i];
+        dst += L;
+        *dst++ = scale;
+        int *length = (int*)dst;
+        dst += 2;
+
+        struct Bits bits(dst);
+        REP(x, N) {
+            bits.write(best[x*L]&0x3f, 6);
+            best[x*L] >>= 6;
+        }
+
         static struct ArCoder *coder = NULL;
         if (coder == NULL) {
             coder = new ArCoder;
 //            cout << "sizeof " << (sizeof(coder) >> 10) << endl;
-            REP(x, N) coder->learn(best+1+x*L, L-1);
-            coder->save(w);
+            REP(x, N) coder->learn(best+x*L, L);
+            coder->save(bits);
         }
         coder->train();
         
         coder->init_encoder();
-        REP(x, N) coder->encode(best+1+x*L, L-1, w);
-        coder->flush(w);
-        w.flush();
-        used = w.p - dst + N/2;
-
+        REP(x, N) coder->encode(best+x*L, L, bits);
+        coder->flush(bits);
+        bits.flush();
+        *length = bits.p - start;
+        
+        /*
         static struct ArCoder *coder2 = NULL;
         struct Bits r(dst);
+        REP(x, N) {
+            best[x*L] <<= 6;
+            best[x*L] += r.read(6);
+        }
         if (coder2 == NULL) {
             coder2 = new ArCoder;
             coder2->load(r);
@@ -1141,7 +1157,7 @@ public:
         coder2->init_decode(r);
         short tmp[60];
         REP(x, N) {
-            coder2->decode(tmp+1, L-1, r);
+            coder2->decode(tmp, L, r);
             FOR(i, 1, L) {
                 if (tmp[i] != best[i+x*L]) {
                     printf("fail %d %d %d!=%d\n", x, i, best[i+x*L], tmp[i]);
@@ -1149,106 +1165,11 @@ public:
                     break;
                 }
             }
-        }
-        }
+        }*/
 
-//        const int STEP = 8;
-        Huffman *hm = new Huffman;
-//        Huffman *hm8 = new Huffman;
-        short *tmp = best;
-        REP(x, N) {
-            short mod = (tmp[0]+32) % 64, cc = (tmp[0]+32)/64;
-            if (mod < 0) cc -= 1;
-            hm->add<1, 1>(&cc);
-            hm->add<L-1, STEP>(tmp+1);
-//            hm8->add<1, 1>(&cc);
-//            hm8->add<L-1, 8>(tmp+1);
-            tmp += L;
-        }
-
-        hm->prebuild();
-        hm->buildTree();
-//        hm8->prebuild();
-//        hm8->buildTree();
-        
-//        tmp = best;
-//        int bit6=0, bit8=0;
-//        REP(x, N) {
-//            short mod = (tmp[0]+32) % 64, cc = (tmp[0]+32)/64;
-//            if (mod < 0) cc -= 1;
-//            bit6 += hm6->calc<1, 1>(&cc);
-//            bit8 += hm8->calc<1, 1>(&cc);
-//            bit6 += hm6->calc<L-1, 6>(tmp+1);
-//            bit8 += hm8->calc<L-1, 8>(tmp+1);
-//            tmp += L;
-//        }
-//        bit8 = 1;
-//        //int nbits = bit6 < bit8 ? bit6 : bit8;
-//        cout << "diff " << float(bit8-bit6)*100/bit6 << endl;
-
-        // output
-        short *start = dst;
-        *dst++ = STEP;
-//        *dst++ = bit6 < bit8 ? 6 : 8;
-        REP(i, L) dst[i] = avg[i];
-        dst += L;
-        
-        *dst++ = scale;
-        struct Bits bits(dst);
-        hm->write(bits);
-        int header = bits.p - dst;
-        tmp = best;
-        REP(x, N) {
-            short mod = (tmp[0]+32) % 64, cc = (tmp[0]+32)/64;
-            if (mod < 0) {
-                mod += 64;
-                cc -= 1;
-            }
-            bits.write(mod, 6);
-            hm->encode<1, 1>(&cc, bits);
-            hm->encode<L-1, STEP>(tmp+1, bits);
-//            if (bit6 < bit8) 
-//                hm->encode<L-1, 6>(tmp+1, bits);
-//            else
-//                hm->encode<L-1, 8>(tmp+1, bits);
-            tmp += L;
-        }
-        bits.flush();
-        int length =  bits.p - start;
-        cout << "saved " << (length - header - used) * 100.0 / (length-header) << " header " << (header*100.0/length) << endl;
-/*        // test 
-        {
-        short *t=best;
-        struct Bits bits(dst);
-        struct Huffman *hm = new Huffman;
-        hm->read(bits);
-        hm->buildTree();
-        short tmp[60];
-        REP(x, 0) {
-            tmp[0] = bits.read(6) - 32;
-            short v = 0;
-            hm->decode(&v, 1, 1, bits);
-            tmp[0] += v * 64;
-            hm->decode(tmp+1, L-1, STEP, bits); 
-            int exit = false;
-            REP(i, L) if (t[i] != tmp[i]) {
-                    cout << x << " " << i << " " << t[i] << " != " << tmp[i] << endl;
-                    REP(k, L) cout << t[k] << " " ; cout << endl;
-                    REP(k, L) cout << tmp[k] << " "; cout << endl;
-                    exit = true;
-                    break;
-                }
-            if (exit) break;
-            t += L;
-        }
-        delete hm;
-        }
-       */
-
-        delete hm;
-//        delete hm8;
         delete []best;
-        return length;
+//        cout << "enc block " << *length << endl;
+        return *length; // STEP
     }
 
     VI decompress(VI &dat) {
@@ -1280,45 +1201,48 @@ public:
     void doDecompress(short *dst, short *src, int X, int Y) {
         int XBLOCKS = *src++;
         int YBLOCKS = *src++;
+//        cout << " dec BLOCKS " << XBLOCKS << " " << YBLOCKS << endl;    
   //      cout << "block " << BLOCKS << endl;
 
         int NX = X/XBLOCKS, NY= Y/YBLOCKS;
         REP(x, XBLOCKS) {
         REP(y, YBLOCKS) {
-            int step = *src++;
-            switch (step) {
-            case 8: src += decompress_block<L, 8>(src, dst, x, y, NX, NY, Y); break;
-            case 6: src += decompress_block<L, 6>(src, dst, x, y, NX, NY, Y); break;
-//            case 4: src += decompress_block<L, 4>(src, dst, x, y, NX, NY, Y); break;
-//            case 3: src += decompress_block<L, 3>(src, dst, x, y, NX, NY, Y); break;
-//            case 2: src += decompress_block<L, 2>(src, dst, x, y, NX, NY, Y); break;
-//            case 1: src += decompress_block<L, 1>(src, dst, x, y, NX, NY, Y); break;
-            }
+            src += decompress_block<L>(src, dst, x, y, NX, NY, Y);
         }
         }
     }
 
-    template <int L, int STEP>
+    template <int L>
     int decompress_block(short *src, short *dst, int x, int y, int NX, int NY, int Y) {
         short* avg = src;
 //          cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
         src += L;
-        int SCALE= *src++;
-        struct Bits bits(src);
-        struct Huffman *hm = new Huffman;
-        hm->read(bits);
-        hm->buildTree();
+        int SCALE = *src++;
+        int length = *(int*)src;
+        src += 2;;
 
+        struct Bits r(src);
+        REP(x1, NX) {
+            short *buf = dst + ((x*NX+x1)*Y+y*NY)*L;
+            REP(y1, NY) {
+                buf[y1*L] = r.read(6);
+            }
+        }
+        static struct ArCoder *coder = NULL;
+        if (coder == NULL) {
+            coder = new ArCoder;
+            coder->load(r);
+        }
+        coder->train();
+        
+        coder->init_decode(r);
         short tmp[60];
         REP(x1, NX) {
             short *buf = dst + ((x*NX+x1)*Y+y*NY)*L;
             REP(y1, NY) {
-                tmp[0] = bits.peek(6) - 32;
-                bits.shift(6);
-                short v = 0;
-                hm->decode<1, 1>(&v, bits);
-                tmp[0] += v * 64;
-                hm->decode<L-1, STEP>(tmp+1, bits);
+                coder->decode(tmp, L, r);
+                tmp[0] <<= 6;
+                tmp[0] += buf[0];
                 
                 int last = 0;
                 REP(j, L) {
@@ -1330,9 +1254,8 @@ public:
                 buf += L;
             }
         }
-        delete hm;
-        bits.rollback();
-        src = bits.p; // next block
-        return src - avg;
+        r.rollback();
+//        cout << "block size " << (length) << endl;
+        return length;
     }
 };
