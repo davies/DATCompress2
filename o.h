@@ -110,6 +110,7 @@ struct Bits {
     int read(int n) {
         int r = peek(n);
         shift(n);
+//        cout << "read " << n << " " << r << endl;
         return r;
     }
     void rollback(void) {
@@ -245,10 +246,11 @@ struct ArCoder {
         }
     }
 
-    void save(Bits bits) {
+    void save(Bits &bits) {
         int used = 0;
-        int tmp[SYMBOL_COUNT], m=0;
+        int tmp[SYMBOL_COUNT];
         REP(k, GROUPS) {
+            int m = 0;
             REP(i, SYMBOL_COUNT) {
                 tmp[i] = encodeSize(symbols[k][i].count);
                 if (tmp[i] > m) {
@@ -256,7 +258,9 @@ struct ArCoder {
                 }
             }
             int bps = bitCount(m);
-            bits.write(bps, 4); 
+            bits.write(bps, 3); 
+//            cout << k << " " << bps << endl;
+            if (bps==0) continue;
             REP(i, SYMBOL_COUNT) {
                 if (tmp[i] > 0) {
                     bits.write(1, 1);
@@ -274,7 +278,9 @@ struct ArCoder {
     void load(Bits &bits) {
         memset(symbols, 0, sizeof(symbols));
         REP(k, GROUPS) {
-            int bps = bits.read(4);
+            int bps = bits.read(3);
+//            cout << "load " << k << " " << bps << endl;
+            if (bps==0) continue;
             REP(i, SYMBOL_COUNT) {
                 if (bits.read_bit()) {
                     symbols[k][i].count = decodeSize(bits.read(bps));
@@ -406,17 +412,21 @@ void test_arcoding() {
     short nums[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 13, 15};
     struct ArCoder *coder = new ArCoder;
     coder->learn(nums, 15);
-    coder->train();
 
-    short buf[30];
+    short buf[300];
     struct Bits w(buf);
+    coder->save(w);
+    coder->train();
     coder->init_encoder();
     coder->encode(nums, 15, w);
     coder->flush(w);
     w.flush();
-    
+//    REP(i, 300) cout << buf[i] << " " ; cout << endl;
+
     short rbuf[20];
     struct Bits r(buf);
+    coder->load(r);
+    coder->train();
     coder->init_decode(r);
     coder->decode(rbuf, 15, r);
     REP(i, 15) {
@@ -1104,12 +1114,12 @@ public:
 
         // try to ar
         int used = 0;
-        struct Bits w(dst);
         {
+        struct Bits w(dst);
         static struct ArCoder *coder = NULL;
         if (coder == NULL) {
             coder = new ArCoder;
-            cout << "sizeof " << (sizeof(coder) >> 10) << endl;
+//            cout << "sizeof " << (sizeof(coder) >> 10) << endl;
             REP(x, N) coder->learn(best+1+x*L, L-1);
             coder->save(w);
         }
@@ -1121,16 +1131,17 @@ public:
         w.flush();
         used = w.p - dst + N/2;
 
-//        static struct ArCoder coder2;
+        static struct ArCoder *coder2 = NULL;
         struct Bits r(dst);
-//        if (!coder2.init) {
-//            coder2.load(r);
-//        }
-//        coder2.train();
-        coder->init_decode(r);
+        if (coder2 == NULL) {
+            coder2 = new ArCoder;
+            coder2->load(r);
+        }
+        coder2->train();
+        coder2->init_decode(r);
         short tmp[60];
         REP(x, N) {
-            coder->decode(tmp+1, L-1, r);
+            coder2->decode(tmp+1, L-1, r);
             FOR(i, 1, L) {
                 if (tmp[i] != best[i+x*L]) {
                     printf("fail %d %d %d!=%d\n", x, i, best[i+x*L], tmp[i]);
