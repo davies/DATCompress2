@@ -121,6 +121,200 @@ struct Bits {
     }
 };
 
+
+struct Symbol {
+    unsigned short low_count;
+    unsigned short high_count;
+};
+
+const int MAX_NUMBER = 32;
+const int SYMBOL_COUNT = MAX_NUMBER * 2 + 1;
+const int GROUPS = 60*16;
+const int NUM_IN_GROUP = 2;
+
+struct ArCoder {
+    unsigned short int code;
+    unsigned short int low;
+    unsigned short int high;
+    int underflow_bits;
+    int scale[GROUPS];
+    Symbol symbols[GROUPS][SYMBOL_COUNT];
+    char index[GROUPS][1<<16];
+    ArCoder() {
+        memset(symbols, 0, sizeof(symbols));
+        memset(scale, 0, sizeof(scale));
+        memset(index, 0, sizeof(index));
+    }
+    
+    void init_encoder() {
+        low = 0;
+        high = 0xffff;
+        underflow_bits = 0;
+    }
+
+    void learn(short *src, int size) {
+        REP(i, size) {
+            //assert(src[i] >= -MAX_NUMBER && src[i] <= MAX_NUMBER);
+            int idx = get_ctx(i, src);
+            if (abs(src[i]) < MAX_NUMBER) {
+                symbols[idx][src[i]+MAX_NUMBER].high_count ++;
+                scale[idx] ++;
+            } else {
+                symbols[idx][0].high_count ++;
+                symbols[idx][src[i]/MAX_NUMBER + MAX_NUMBER].high_count ++;
+                cout << src[i] % MAX_NUMBER << endl;
+                symbols[idx][src[i] % MAX_NUMBER + MAX_NUMBER].high_count ++;
+                scale[idx] += 3;
+            }
+        }
+    }
+
+    void train() {
+        REP(k, GROUPS) {
+            if (scale[k] > (1<<14)) {
+                float n  = float(scale[k]) / (1<<14);
+                REP(i, SYMBOL_COUNT) {
+                    if (symbols[k][i].high_count > 0) {
+                        symbols[k][i].high_count = int((symbols[k][i].high_count) / n);
+                    }
+                }
+            }
+            scale[k] = 0;
+            // FIXME overflow
+            REP(i, SYMBOL_COUNT) {
+                symbols[k][i].low_count = scale[k];
+                symbols[k][i].high_count += scale[k];
+                scale[k] = symbols[k][i].high_count;
+    //            if (symbols[i].high_count > symbols[i].low_count) {
+    //                printf("symbol %d: %d - %d\n", i - MAX_NUMBER, symbols[i].low_count, symbols[i].high_count);
+    //            }
+                FOR(j, symbols[k][i].low_count, symbols[k][i].high_count) {
+                    index[k][j] = i;
+                }
+            }
+//            cout << "all " << scale[k] << endl;
+        }
+    }
+
+    void encode_symbol(int ctx, Symbol* s, Bits &bits) {
+        unsigned int range = high - low + 1;
+        high = low + (range * s->high_count / scale[ctx]) - 1;
+        low += range * s->low_count / scale[ctx];
+
+        for(;;) {
+            if ((high & 0x8000) == (low & 0x8000)) {
+                bits.write((high >> 15), 1);
+                while (underflow_bits > 0) {
+                    bits.write(((~high)>>15)&1, 1);
+                    underflow_bits -- ;
+                }
+            } else if ((low & 0x4000) && !(high & 0x4000)) {
+                underflow_bits += 1;
+                low  &= 0x3fff;
+                high |= 0x4000;
+            } else {
+                break;
+            }
+            low <<= 1;
+            high <<= 1;
+            high |= 1;
+        }
+    }
+    
+    void encode(short *src, int size, Bits &bits) {
+        REP(i, size) {
+            int idx = get_ctx(i, src);
+            if (abs(src[i]) < MAX_NUMBER) {
+                encode_symbol(idx, symbols[idx] + src[i] + MAX_NUMBER, bits); 
+            } else {
+                encode_symbol(idx, symbols[idx] + 0, bits); 
+                encode_symbol(idx, symbols[idx] + src[i]/MAX_NUMBER + MAX_NUMBER, bits); 
+                encode_symbol(idx, symbols[idx] + src[i]%MAX_NUMBER + MAX_NUMBER, bits); 
+            }
+        }
+    }
+
+    void flush(Bits &bits) {
+        int b = (low>>14) & 1;
+        bits.write(b, 1);
+        underflow_bits++;
+        while (underflow_bits-- > 0) 
+            bits.write((~b)&1, 1);
+    }
+
+    void init_decode(Bits &bits) {
+        code = bits.read(16);
+        low = 0;
+        high = 0xffff;
+    }
+
+    int decode_symbol(Bits &bits, int ctx) {
+        unsigned int range = high - low + 1;
+        unsigned int count = (((code-low) + 1) * scale[ctx] - 1) / range;
+        Symbol *s = &symbols[ctx][index[ctx][count]];
+        high = low + range * s->high_count / scale[ctx] - 1;
+        low += range * s->low_count / scale[ctx];
+        for (;;) {
+            if ( (high & 0x8000) == (low & 0x8000)) {
+                
+            } else if ( (low & 0x4000) == 0x4000 && (high&0x4000)==0) {
+                code ^= 0x4000;
+                low  &= 0x3fff;
+                high |= 0x4000;
+            } else {
+                break;
+            }
+            low <<= 1;
+            high <<= 1;
+            high |= 1;
+            code <<= 1;
+            code |= bits.read_bit();
+        }
+        return index[ctx][count] - MAX_NUMBER;
+    }
+
+    int get_ctx(int i, short *src) {
+            int p1 = (i>0 ? (src[i-1]<=-1 ? 0 : (src[i-1]>2 ? 3 : src[i-1]+1)): 0);
+            int p2 = (i>1 ? (src[i-2]<=-1 ? 0 : (src[i-2]>2 ? 3 : src[i-2]+1)): 0);
+            int idx = (i/NUM_IN_GROUP + i%2)*16 + p1 * 4 + p2;
+            return idx;
+    }
+
+    void decode(short *dst, int size, Bits &bits) {
+        REP(i, size) {
+            int idx = get_ctx(i, dst);
+            int v = decode_symbol(bits, idx);
+            if (v == -MAX_NUMBER) {
+                v = decode_symbol(bits, idx) * MAX_NUMBER + decode_symbol(bits, idx);
+            }
+            dst[i] = v; 
+        }
+    }
+};
+
+void test_arcoding() {
+    short nums[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 13, 15};
+    struct ArCoder coder;
+    coder.learn(nums, 15);
+    coder.train();
+
+    short buf[30];
+    struct Bits w(buf);
+    coder.init_encoder();
+    coder.encode(nums, 15, w);
+    coder.flush(w);
+    w.flush();
+    
+    short rbuf[20];
+    struct Bits r(buf);
+    coder.init_decode(r);
+    coder.decode(rbuf, 15, r);
+    REP(i, 15) {
+        if (nums[i] != rbuf[i]) printf("fail %d %d != %d\n", i, nums[i], rbuf[i]);
+    }
+}
+
+
 const int TRY_STEP = 7;
 const int STEP = 8;
 const int NUM_LIMIT = 30;
@@ -733,8 +927,8 @@ public:
 
     template <int L>
     int doCompress(short *dst, short *src, int X, int Y) {
-        int XBLOCKS = 9;
-        int YBLOCKS = 9;
+        int XBLOCKS = 10;
+        int YBLOCKS = 10;
         while (X % XBLOCKS != 0) XBLOCKS --;
         while (Y % YBLOCKS != 0) YBLOCKS --;
         
@@ -817,6 +1011,35 @@ public:
             }
         }
 
+        // try to ar
+        int used = 0;
+        {
+        struct ArCoder coder;
+        REP(x, N) coder.learn(best+1+x*L, L-1);
+        coder.train();
+        
+        coder.init_encoder();
+        struct Bits w(dst);
+        REP(x, N) coder.encode(best+1+x*L, L-1, w);
+        coder.flush(w);
+        w.flush();
+        used = w.p - dst + N/2;
+
+        struct Bits r(dst);
+        coder.init_decode(r);
+        short tmp[60];
+        REP(x, N) {
+            coder.decode(tmp+1, L-1, r);
+            FOR(i, 1, L) {
+                if (tmp[i] != best[i+x*L]) {
+                    printf("fail %d %d %d!=%d\n", x, i, best[i+x*L], tmp[i]);
+                    x = N;
+                    break;
+                }
+            }
+        }
+        }
+
 //        const int STEP = 8;
         Huffman *hm = new Huffman;
 //        Huffman *hm8 = new Huffman;
@@ -879,7 +1102,7 @@ public:
         }
         bits.flush();
         int length =  bits.p - start;
-
+        cout << "saved " << (length - used) * 100.0 / length << endl;
 /*        // test 
         {
         short *t=best;
