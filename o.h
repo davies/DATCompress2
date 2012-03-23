@@ -126,7 +126,7 @@ struct Bits {
 const unsigned int MinLength = 0x01000000U;   // threshold for renormalization
 const unsigned int MaxLength = 0xFFFFFFFFU;      // maximum AC interval length
 const unsigned int LengthShift = 15;     // length bits discarded before mult.
-const unsigned int MaxCount    = 1 << LengthShift;  // for adaptive model2
+const unsigned int MaxCount    = 1 << LengthShift;  // for adaptive models
 const unsigned int LOOKUP_LIMIT = 16;
 
 struct Model {
@@ -169,8 +169,7 @@ struct Model {
     void update(bool enc) {
         if ((total_count += update_cycle*128) > MaxCount) {
             total_count = 0;
-            REP(n, ns) 
-                total_count += (count[n] = (count[n] + 1) >> 1);
+            REP(n, ns) total_count += (count[n] = (count[n] + 1) >> 1);
         }
         unsigned sum = 0, s = 0;
         unsigned scale = 0x80000000U / total_count;
@@ -191,8 +190,6 @@ struct Model {
             while (s <= table_size) dtable[++s] = ns - 1;
         }
 
-        // set frequency of model updates
-//        REP(i, ns) count[i] = (count[i]+1)/2;
         update_cycle = (5 * update_cycle) >> 2;
         unsigned max_cycle = (ns + 6) << 2;
         if (update_cycle > max_cycle) update_cycle = max_cycle;
@@ -203,58 +200,48 @@ struct Model {
 const int MAX_NUMBER = 16;
 const int SYMBOL_COUNT = MAX_NUMBER * 2+1;
 const int MAX_L = 60;
-const int WIDTH = 5;
+const int WIDTH = 3;
 const int GROUPS = 60*WIDTH*WIDTH;
 
 struct ArCoder {
-    unsigned char *buffer, *ac_pointer;
-    unsigned int base, value, length, buffer_size;
-
-    Model model0[MAX_L];
-    Model model1[MAX_L*WIDTH];
-    Model model2[GROUPS];
+    unsigned char *buffer, *current;
+    unsigned int base, value, length;
+    Model models[GROUPS];
 
     ArCoder() {
-        REP(i, MAX_L) model0[i].init(SYMBOL_COUNT);
-        REP(i, MAX_L*WIDTH) model1[i].init(SYMBOL_COUNT);
-        REP(i, GROUPS) {
-              model2[i].init(SYMBOL_COUNT);
-        }
+        REP(i, GROUPS) models[i].init(SYMBOL_COUNT); 
     }
     
-    inline void propagate_carry() {
-        unsigned char *p = ac_pointer -1;
-        for (p = ac_pointer - 1; *p == 0xFFU; p--) *p = 0;
+    inline void write_bit() {
+        unsigned char *p = current -1;
+        while (*p == 0xFF) *p--=0;
         ++*p;
     }
 
-    inline void renorm_enc_interval() {
+    inline void enc_renorm() {
         do {
-            *ac_pointer++ = (unsigned char)(base >> 24);
+            *current++ = base >> 24;
             base <<= 8;
         } while ((length <<= 8) < MinLength);
     }
 
-    inline void renorm_dec_interval() {
+    inline void dec_renorm() {
         do {
-            value = (value << 8) | unsigned(*++ac_pointer);
+            value = (value << 8) | (*++current);
         } while ((length <<= 8) < MinLength);
     }
 
     inline void put_bits(unsigned int data, int bits) {
-        unsigned init_base = base;
-        base += data * (length >>= bits);            // new interval base and length
-
-        if (init_base > base) propagate_carry();                 // overflow = carry
-        if (length < MinLength) renorm_enc_interval();        // renormalization
+        unsigned old = base;
+        base += data * (length >>= bits);
+        if (old > base) write_bit();
+        if (length < MinLength) enc_renorm();
     }
 
     inline unsigned int get_bits(int bits) {
-        unsigned s = value / (length >>= bits);      // decode symbol, change length
-
-        value -= length * s;                                      // update interval
-        if (length < MinLength) renorm_dec_interval();        // renormalization
-
+        unsigned s = value / (length >>= bits);
+        value -= length * s;
+        if (length < MinLength) dec_renorm();
         return s;
     }
 
@@ -262,100 +249,74 @@ struct ArCoder {
         buffer = (unsigned char*)dst;
         base = 0;
         length = MaxLength;
-        ac_pointer = buffer;
+        current = buffer;
     }
 
     void encode_byte(unsigned int data, Model &M) {
-        unsigned x, init_base = base;
-        // compute products
+        unsigned x, old = base;
         if (data == M.last_symbol) {
             x = M.distribution[data] * (length >> LengthShift);
-            base   += x;                                            // update interval
-            length -= x;                                          // no product needed
-        }
-        else {
+            base   += x;                                           
+            length -= x;                                     
+        } else {
             x = M.distribution[data] * (length >>= LengthShift);
-            base   += x;                                            // update interval
+            base   += x;                                      
             length  = M.distribution[data+1] * length - x;
         }
 
-        if (init_base > base) propagate_carry();                 // overflow = carry
-
-        if (length < MinLength) renorm_enc_interval();        // renormalization
-
+        if (old > base) write_bit();          
+        if (length < MinLength) enc_renorm();    
         M.learn(data, true);
     }
 
     inline int gen_code(int v) {
-        return v < -2 ? 0 : (v > 2 ? 4 : (v + 2));
+        return v < -1 ? 0 : (v > 1 ? 2 : (v + 1));
     }
 
     inline int gen_index(int i, int code0, int code1) {
-        return i*25 + code0*5 + code1;
+        return i*WIDTH*WIDTH + code0*WIDTH + code1;
     }
 
-    inline Model* choose(int i, int code0, int code1) {
-        int idx2 = gen_index(i, code0, code1);
-            return &model2[idx2];
-//        int idx1 = i*WIDTH + code1;
-//        if (model2[idx2].avg_length < 1) {
-////            cout << " 2 " ;
-//          return &model2[idx2];
-//      } else if (model1[idx1].avg_length < 1) {
-////            cout << " 1 " <<  model2[idx2].avg_length - model1[idx1].avg_length << endl;
-//          return &model1[idx1];
-//      } else {
-////            cout << " 0 " << model1[idx1].avg_length - model0[i].avg_length << endl;
-//            return &model0[i];
-//        }
-    }
-    
-    void encode_symbol(int i, int code0, int code1, int v) {
-        encode_byte(v, *choose(i, code0, code1));
-    }
-    
-    void encode_one(int i, int code0, int code1, int v) {
+    void encode_one(int ctx, int v) {
+        if (v==0) {
+            encode_byte(SYMBOL_COUNT-1, models[ctx]);
+            return ;
+        }
         while (abs(v) >= MAX_NUMBER) {
-            encode_symbol(i, code0, code1, 0);
+            encode_byte(0, models[ctx]);
             put_bits(v & 0xf, 4);
             v >>= 4;
         }
-        encode_symbol(i, code0, code1, v + MAX_NUMBER);
+        encode_byte(v + MAX_NUMBER, models[ctx]);
     }
 
     void encode(short *src, int size) {
         int code0=0, code1 = 0;
         for(int i=0; i<size-1; i+=2) {
-            encode_one(i, code0, code1, src[i]);
+            encode_one(gen_index(i, code0, code1), src[i]);
             code0 = gen_code(src[i]);
-            encode_one(i+1, code1, code0, src[i+1]);
+            encode_one(gen_index(i+1, code1, code0), src[i+1]);
             code1 = gen_code(src[i+1]);
         }
         if (size%2) {
-            encode_one(size-1, code0, code1, src[size-1]);
+            encode_one(gen_index(size-1, code0, code1), src[size-1]);
         }
 //        cout << "encode " ; REP(i, size) cout << src[i] << " "; cout << endl;
     }
 
     int flush() {
-        unsigned init_base = base;            // done encoding: set final data bytes
-
+        unsigned old = base;
         if (length > 2 * MinLength) {
-            base  += MinLength;                                     // base offset
-            length = MinLength >> 1;             // set new length for 1 more byte
+            base  += MinLength;
+            length = MinLength >> 1;
+        } else {
+            base  += MinLength >> 1;
+            length = MinLength >> 9;
         }
-        else {
-            base  += MinLength >> 1;                                // base offset
-            length = MinLength >> 9;            // set new length for 2 more bytes
-        }
 
-        if (init_base > base) propagate_carry();                 // overflow = carry
-
-        renorm_enc_interval();                // renormalization = output last bytes
-
-        unsigned code_bytes = unsigned(ac_pointer - buffer);
-
-        return code_bytes;                                   // number of bytes used
+        if (old > base) write_bit();
+        enc_renorm();
+        return (current - buffer+1)/2;
     }
 
     void init_decode(short *dst) {
@@ -363,7 +324,7 @@ struct ArCoder {
         length = MaxLength;
         value = (unsigned(buffer[0]) << 24)|(unsigned(buffer[1]) << 16) |
           (unsigned(buffer[2]) <<  8)| unsigned(buffer[3]);
-        ac_pointer = buffer + 3;
+        current = buffer + 3;
     }
 
     int decode_byte(Model &M) {
@@ -408,44 +369,39 @@ struct ArCoder {
         value -= x;                                               // update interval
         length = y - x;
 
-        if (length < MinLength) renorm_dec_interval();        // renormalization
+        if (length < MinLength) dec_renorm();        // renormalization
         
         M.learn(s, false);
         return s;
     }
         
-    int decode_symbol(int i, int code0, int code1) {        
-        int r = decode_byte(*choose(i, code0, code1));
-        return r - MAX_NUMBER;
-    }
-
-    int decode_one(int i, int code0, int code1) {
-        int r = decode_symbol(i, code0, code1);
-        if (r != -MAX_NUMBER) {
-            return r;
+    int decode_one(int ctx) {
+        int r = decode_byte(models[ctx]);
+        if (r == SYMBOL_COUNT-1) return 0; 
+        if (r != 0) {
+            return r - MAX_NUMBER;
         }
         int v = 0, c = 0;
         do {
             v |= get_bits(4) << c;
             c += 4;
-            r = decode_symbol(i, code0, code1);
-        } while (r == -MAX_NUMBER);
-        v += r << c; 
+            r = decode_byte(models[ctx]);
+        } while (r == 0);
+        v += (r-MAX_NUMBER) << c; 
         return v;
     }
 
     void decode(short *dst, int size) {
         int code0=0, code1 = 0;
         for(int i=0; i<size-1; i+=2) {
-            dst[i] = decode_one(i, code0, code1);
+            dst[i] = decode_one(gen_index(i, code0, code1));
             code0 = gen_code(dst[i]);
-            dst[i+1] = decode_one(i+1, code1, code0);
+            dst[i+1] = decode_one(gen_index(i+1, code1, code0));
             code1 = gen_code(dst[i+1]);
         }
         if (size % 2) {
-            dst[size-1] = decode_one(size-1, code0, code1);
+            dst[size-1] = decode_one(gen_index(size-1, code0, code1));
         }
-//        cout << "decode " ; REP(i, size) cout << dst[i] << " "; cout  << endl;
     }
 };
 
@@ -610,8 +566,8 @@ public:
 
     template <int L>
     int doCompress(short *dst, short *src, int X, int Y) {
-        int XBLOCKS = 9;
-        int YBLOCKS = 9;
+        int XBLOCKS = 90;
+        int YBLOCKS = 90;
         while (X % XBLOCKS != 0) XBLOCKS --;
         while (Y % YBLOCKS != 0) YBLOCKS --;
 //        cout << "BLOCKS " << XBLOCKS << " " << YBLOCKS << endl;    
@@ -690,7 +646,7 @@ public:
             zero = call_try_compress<L>(src, N, avg, best, scale, 1);
             if (zero == 0) {
                 scale --;
-                cout << "try " << scale << endl;
+//                cout << "try " << scale << endl;
                 zero = call_try_compress<L>(src, N, avg, best, scale, 1);
             }
         }
@@ -714,44 +670,15 @@ public:
         static struct ArCoder *coder = NULL;
         if (coder == NULL) {
             coder = new ArCoder;
-//            cout << "sizeof " << (sizeof(coder) >> 10) << endl;
-//            REP(x, N) coder->learn(best+x*L, L);
-//            coder->save(bits);
         }
-//        coder->train();
         
         coder->init_encoder(dst);
         REP(x, N) coder->encode(best+x*L, L);
-        *length = (coder->flush()+1)/2 + dst - start;
+        *length = coder->flush() + dst - start;
 //        cout << (*length*16/N) << endl; 
-        /*
-        static struct ArCoder *coder2 = NULL;
-        struct Bits r(dst);
-        REP(x, N) {
-            best[x*L] <<= 6;
-            best[x*L] += r.read(6);
-        }
-        if (coder2 == NULL) {
-            coder2 = new ArCoder;
-            coder2->load(r);
-        }
-        coder2->train();
-        coder2->init_decode(r);
-        short tmp[60];
-        REP(x, N) {
-            coder2->decode(tmp, L, r);
-            FOR(i, 1, L) {
-                if (tmp[i] != best[i+x*L]) {
-                    printf("fail %d %d %d!=%d\n", x, i, best[i+x*L], tmp[i]);
-                    x = N;
-                    break;
-                }
-            }
-        }*/
-
         delete []best;
 //        cout << "enc block " << *length << endl;
-        return *length; // STEP
+        return *length;
     }
 
     VI decompress(VI &dat) {
