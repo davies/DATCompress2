@@ -1,4 +1,4 @@
-//#define KEEP_HALF
+const int TRY_STEP = 7;
 
 #include <string>
 #include <iostream>
@@ -11,10 +11,10 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <queue>
-#include <assert.h>
+//#include <assert.h>
 #include <math.h>
 
-//#define assert(x) 
+#define assert(x) 
 
 using namespace std;
 
@@ -47,14 +47,6 @@ public:
 #define DV(v) REP(_i,SZ(v)) cerr << v[_i] << " "; cerr << endl
 #define PII pair<int, int>
 #define MP(x,y) make_pair<int,int>(x,y)
-
-#ifdef USE_EXPECT
-#define likely(x)    __builtin_expect((x), 1)
-#define unlikely(x) __builtin_expect((x), 0)
-#else
-#define likely(x)    (x)
-#define unlikely(x) (x)
-#endif
 
 struct Bits {
     int data;
@@ -123,10 +115,10 @@ struct Bits {
     }
 };
 
-const unsigned int MinLength = 0x01000000U;   // threshold for renormalization
-const unsigned int MaxLength = 0xFFFFFFFFU;      // maximum AC interval length
-const unsigned int LengthShift = 15;     // length bits discarded before mult.
-const unsigned int MaxCount    = 1 << LengthShift;  // for adaptive models
+const unsigned int MinLength = 0x01000000U;
+const unsigned int MaxLength = 0xFFFFFFFFU;
+const unsigned int LengthShift = 15; 
+const unsigned int MaxCount    = 1 << LengthShift;
 const unsigned int LOOKUP_LIMIT = 16;
 
 struct Model {
@@ -334,47 +326,36 @@ struct ArCoder {
     int decode_byte(Model &M) {
         unsigned n, s, x, y = length;
 
-        if (M.dtable) {              // use table look-up for faster decoding
-
+        if (M.dtable) {
             unsigned dv = value / (length >>= LengthShift);
             unsigned t = dv >> M.table_shift;
-
-            s = M.dtable[t];         // initial decision based on table look-up
+            s = M.dtable[t]; 
             n = M.dtable[t+1] + 1;
-
-            while (n > s + 1) {                        // finish with bisection search
+            while (n > s + 1) {                
                 unsigned m = (s + n) >> 1;
                 if (M.distribution[m] > dv) n = m; else s = m;
             }
-            // compute products
             x = M.distribution[s] * length;
             if (s != M.last_symbol) y = M.distribution[s+1] * length;
-        }
-
-        else {                                  // decode using only multiplications
-
+        } else {
             x = s = 0;
             length >>= LengthShift;
             unsigned m = (n = M.ns) >> 1;
-            // decode via bisection search
             do {
                 unsigned z = length * M.distribution[m];
                 if (z > value) {
                     n = m;
-                    y = z;                                             // value is smaller
-                }
-                else {
+                    y = z;                                        
+                } else {
                     s = m;
-                    x = z;                                     // value is larger or equal
+                    x = z;
                 }
             } while ((m = (s + n) >> 1) != s);
         }
 
         value -= x;                                               // update interval
         length = y - x;
-
         if (length < MinLength) dec_renorm();        // renormalization
-        
         M.learn(s, false);
         return s;
     }
@@ -413,37 +394,6 @@ struct ArCoder {
     }
 };
 
-void test_arcoding() {
-    short nums[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 13, 15};
-    struct ArCoder *coder = new ArCoder;
-//    coder->learn(nums, 15);
-
-    short buf[300];
-//    struct Bits w(buf);
-//    coder->save(w);
-//    coder->train();
-    coder->init_encoder(buf);
-    coder->encode(nums, 15);
-    int r = coder->flush();
-    cout << r << endl;
-//    w.flush();
-//    REP(i, 300) cout << buf[i] << " " ; cout << endl;
-
-    short rbuf[20];
-//    struct Bits r(buf);
-//    coder->load(r);
-//    coder->train();
-    coder->init_decode(buf);
-    coder->decode(rbuf, 15);
-    REP(i, 15) {
-        if (nums[i] != rbuf[i]) printf("fail %d %d != %d\n", i, nums[i], rbuf[i]);
-    }
-
-    delete coder;
-}
-
-
-const int TRY_STEP = 7;
 
 class DATCompression2 {
 public:
@@ -547,7 +497,6 @@ public:
     VI compress(VI &dat) {
         short *src = (short*) &dat[0];
         int X=src[0], Y=src[1], L=src[2];
-//        cout << X << Y << L << " " << SZ(dat) << endl;
         src += 3;
 
         myvector myoutput(SZ(dat)*2+1000);
@@ -557,12 +506,8 @@ public:
         *dst++ = L;
         
         dst += doCompress(dst, src, X, Y, L);
-
-#ifdef KEEP_HALF
-        myoutput.myresize((dst - (short*)&myoutput[0]+1));
-#else
         myoutput.myresize((dst - (short*)&myoutput[0]+1)/2);
-#endif
+        
         VI output;
         output.swap(myoutput);
         return output;
@@ -671,22 +616,17 @@ AGAIN:
             short t[L];
             REP(i, L) t[i] = avg[i] - (*last_avg)[i];
             for(int i=L-1;i>0; i--) t[i] -= t[i-1];
-            //for(int i=L-1;i>1; i--) t[i] -= t[i-1];
             
             coder->init_encoder(dst);
             coder->put_bits(t[0] & 0xf, 4);
             t[0] >>= 4;
             REP(i, L) coder->encode(t+i, 1);
-//            cout << "avg used " << (coder->current - coder->buffer) << endl;
- //           REP(i, L) cout << t[i] << " " ; cout << endl;
         }
         REP(i, L) (*last_avg)[i] = avg[i];
         
         REP(x, N) coder->encode(best+x*L, L);
         *length = coder->flush() + dst - start;
-//        cout << (*length*16/N) << endl; 
         delete []best;
-//        cout << "enc block " << *length << endl;
         return *length;
     }
 
@@ -746,11 +686,9 @@ AGAIN:
             REP(i, L) coder->decode(avg+i, 1);
             avg[0] <<= 4;
             avg[0] += header;
-            //FOR(i, 2, L) avg[i] += avg[i-1];
             FOR(i, 1, L) avg[i] += avg[i-1];
             REP(i, L) avg[i] += (*last_avg)[i];
         }
-    //          cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
         REP(i, L) (*last_avg)[i] = avg[i];
 
 
@@ -772,7 +710,6 @@ AGAIN:
                 buf += L;
             }
         }
-//        cout << "block size " << (length) << endl;
         return length;
     }
 };
