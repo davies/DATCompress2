@@ -1,8 +1,9 @@
 #include "o.h"
 
 int main(int argc, char **argv) {
+    test_arcoding();
     test_huffman();
-    
+
     DATCompression2 comp;
     
     float total = 0;
