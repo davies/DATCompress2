@@ -1,9 +1,6 @@
 #include "o.h"
 
 int main(int argc, char **argv) {
-    test_arcoding();
-    test_huffman();
-
     DATCompression2 comp;
     
     float total = 0;
@@ -54,6 +51,9 @@ int main(int argc, char **argv) {
         clock_t start = clock();
         VI inp((int*)header, (int*)(header+X*Y*L+4));
         VI result = comp.compress(inp);
+        FILE* fo = fopen((string(argv[i])+".cmp").c_str(), "wb");
+        fwrite(&result[0], sizeof(int), SZ(result), fo);
+        fclose(fo);
         VI odata = comp.decompress(result);
         double ratio = double(SZ(odata))/SZ(result);
         double t = float(clock() - start)/CLOCKS_PER_SEC;
