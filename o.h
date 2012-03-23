@@ -291,6 +291,10 @@ struct ArCoder {
     }
 
     void encode(short *src, int size) {
+        if (size == 1) {
+            encode_one(1, src[0]);
+            return;
+        }
         int code0=0, code1 = 0;
         for(int i=0; i<size-1; i+=2) {
             encode_one(gen_index(i, code0, code1), src[i]);
@@ -392,6 +396,10 @@ struct ArCoder {
     }
 
     void decode(short *dst, int size) {
+        if (size == 1) {
+            dst[0] = decode_one(1);
+            return;
+        }
         int code0=0, code1 = 0;
         for(int i=0; i<size-1; i+=2) {
             dst[i] = decode_one(gen_index(i, code0, code1));
@@ -436,10 +444,6 @@ void test_arcoding() {
 
 
 const int TRY_STEP = 7;
-const int STEP = 8;
-void test_huffman() {
-}
-
 
 class DATCompression2 {
 public:
@@ -450,7 +454,7 @@ public:
     }
 
     template <int L, int SCALE>
-    int try_compress(short *src, int size, int *avg, short *dst, int step) {
+    int try_compress(short *src, int size, int *avg, short *dst, int step, bool safe) {
         int64_t vdiff = 0;
         int zero = 0;
         int half = SCALE/2;
@@ -476,6 +480,14 @@ public:
                         }
                         if (dst[j+1]==0) zero ++;
                     }
+                    if (d==0) zero ++;
+                    vdiff += calc_diff((tmp[j-1]+d) * SCALE + avg[j], src[j]);
+                    dst[j] = d;
+                    prev = d;
+                }
+            } else if (safe) {
+                for(int j=L-1;j>0;j--) {
+                    short d = tmp[j] - tmp[j-1];
                     if (d==0) zero ++;
                     vdiff += calc_diff((tmp[j-1]+d) * SCALE + avg[j], src[j]);
                     dst[j] = d;
@@ -566,8 +578,8 @@ public:
 
     template <int L>
     int doCompress(short *dst, short *src, int X, int Y) {
-        int XBLOCKS = 90;
-        int YBLOCKS = 90;
+        int XBLOCKS = 10;
+        int YBLOCKS = 10;
         while (X % XBLOCKS != 0) XBLOCKS --;
         while (Y % YBLOCKS != 0) YBLOCKS --;
 //        cout << "BLOCKS " << XBLOCKS << " " << YBLOCKS << endl;    
@@ -578,36 +590,46 @@ public:
 
         int NX = X / XBLOCKS, NY = Y / YBLOCKS;
         short *buf = new short[NX*NY*L];
+        short *avg = NULL;
         REP(x, XBLOCKS) {
             REP(y, YBLOCKS) {
                 REP(i, NX) {
                     memcpy(buf+i*NY*L, src+((x*NX+i)*Y+y*NY)*L, sizeof(short)*NY*L);
                 }
-                dst += compress_block<L>(buf, NX*NY, dst);
+                dst += compress_block<L>(buf, NX*NY, dst, &avg);
             }
         }
         delete []buf;
+        delete []avg;
         return dst - start;
     }
 
     template <int L>
-    int call_try_compress(short *src, int N, int *avg, short *buf, int scale, int step) {
+    int call_try_compress(short *src, int N, int *avg, short *buf, int scale, int step, bool safe) {
         int z = 0;
         switch (scale) {
-        case 20: z = try_compress<L, 20>(src, N, avg, buf, step); break;
-        case 19: z = try_compress<L, 19>(src, N, avg, buf, step); break;
-        case 18: z = try_compress<L, 18>(src, N, avg, buf, step); break;
-        case 17: z = try_compress<L, 17>(src, N, avg, buf, step); break;
-        case 16: z = try_compress<L, 16>(src, N, avg, buf, step); break;
-        case 15: z = try_compress<L, 15>(src, N, avg, buf, step); break;
-        case 14: z = try_compress<L, 14>(src, N, avg, buf, step); break;
-        case 13: z = try_compress<L, 13>(src, N, avg, buf, step); break;
+        case 22: z = try_compress<L, 22>(src, N, avg, buf, step, safe); break;
+        case 21: z = try_compress<L, 21>(src, N, avg, buf, step, safe); break;
+        case 20: z = try_compress<L, 20>(src, N, avg, buf, step, safe); break;
+        case 19: z = try_compress<L, 19>(src, N, avg, buf, step, safe); break;
+        case 18: z = try_compress<L, 18>(src, N, avg, buf, step, safe); break;
+        case 17: z = try_compress<L, 17>(src, N, avg, buf, step, safe); break;
+        case 16: z = try_compress<L, 16>(src, N, avg, buf, step, safe); break;
+        case 15: z = try_compress<L, 15>(src, N, avg, buf, step, safe); break;
+        case 14: z = try_compress<L, 14>(src, N, avg, buf, step, safe); break;
+        case 13: z = try_compress<L, 13>(src, N, avg, buf, step, safe); break;
+        case 12: z = try_compress<L, 12>(src, N, avg, buf, step, safe); break;
+        case 11: z = try_compress<L, 11>(src, N, avg, buf, step, safe); break;
+        case 10: z = try_compress<L, 10>(src, N, avg, buf, step, safe); break;
+        case  9: z = try_compress<L,  9>(src, N, avg, buf, step, safe); break;
+        case  8: z = try_compress<L,  8>(src, N, avg, buf, step, safe); break;
+        case  7: z = try_compress<L,  7>(src, N, avg, buf, step, safe); break;
         }
         return z;
     }
 
     template <int L>
-    int compress_block(short *src, int N, short *dst) {
+    int compress_block(short *src, int N, short *dst, short **last_avg) {
         int avg[60] = {0}, c=N;
         if (c>40000) c = 40000;
         int step = N/c;
@@ -616,13 +638,14 @@ public:
             REP(j, L) avg[j] = avg[j] + src[i*step*L+j];
         }
         REP(i, L) avg[i] = (avg[i]) / c;
-       
-        int zero = 0, scale = 0;
-        short *best=NULL, *buf=NULL;
 
+        int zero = 0, scale = 0;
+        int safe = 0;
+        short *best=NULL, *buf=NULL;
+AGAIN:
         for(int ii=17; ii>12 && ii<21; ii++) {
             if (buf == NULL) buf = new short[N*L];
-            int z = call_try_compress<L>(src, N, avg, buf, ii, TRY_STEP);
+            int z = call_try_compress<L>(src, N, avg, buf, ii, TRY_STEP, safe);
             //cout << "try " << ii << " " << (float(z)/X/Y/L) << endl; 
             if (z == 0) {
                 if (ii > 18) break;
@@ -640,25 +663,29 @@ public:
                 break;
             }
         }
+        if (zero ==0 && !safe) {
+            safe = 1;
+            goto AGAIN;
+        }
+
         if (buf != NULL) delete []buf;
 
         if (TRY_STEP > 1) {
-            zero = call_try_compress<L>(src, N, avg, best, scale, 1);
-            if (zero == 0) {
+            zero = call_try_compress<L>(src, N, avg, best, scale, 1, safe);
+            while (zero == 0) {
                 scale --;
 //                cout << "try " << scale << endl;
-                zero = call_try_compress<L>(src, N, avg, best, scale, 1);
+                zero = call_try_compress<L>(src, N, avg, best, scale, 1, safe);
             }
         }
+        assert(scale > 0);
 
         // output
         short *start = dst;
-        REP(i, L) dst[i] = avg[i];
-        dst += L;
         *dst++ = scale;
         int *length = (int*)dst;
         dst += 2;
-
+        
         struct Bits bits(dst);
         REP(x, N) {
             bits.write(best[x*L]&0xf, 4);
@@ -666,13 +693,31 @@ public:
         }
         bits.flush();
         dst = bits.p;
-
+        
         static struct ArCoder *coder = NULL;
         if (coder == NULL) {
             coder = new ArCoder;
         }
+        if (*last_avg == NULL) {
+            *last_avg = new short[L];
+            REP(i, L) dst[i] = avg[i];
+            dst += L;
+            coder->init_encoder(dst);
+        } else {
+            short t[L];
+            REP(i, L) t[i] = avg[i] - (*last_avg)[i];
+            for(int i=L-1;i>0; i--) t[i] -= t[i-1];
+            //for(int i=L-1;i>1; i--) t[i] -= t[i-1];
+            
+            coder->init_encoder(dst);
+            coder->put_bits(t[0] & 0xf, 4);
+            t[0] >>= 4;
+            REP(i, L) coder->encode(t+i, 1);
+//            cout << "avg used " << (coder->current - coder->buffer) << endl;
+ //           REP(i, L) cout << t[i] << " " ; cout << endl;
+        }
+        REP(i, L) (*last_avg)[i] = avg[i];
         
-        coder->init_encoder(dst);
         REP(x, N) coder->encode(best+x*L, L);
         *length = coder->flush() + dst - start;
 //        cout << (*length*16/N) << endl; 
@@ -714,21 +759,20 @@ public:
   //      cout << "block " << BLOCKS << endl;
 
         int NX = X/XBLOCKS, NY= Y/YBLOCKS;
+        short *avg = NULL;
         REP(x, XBLOCKS) {
         REP(y, YBLOCKS) {
-            src += decompress_block<L>(src, dst, x, y, NX, NY, Y);
+            src += decompress_block<L>(src, dst, x, y, NX, NY, Y, &avg);
         }
         }
+        delete []avg;
     }
 
     template <int L>
-    int decompress_block(short *src, short *dst, int x, int y, int NX, int NY, int Y) {
-        short* avg = src;
-//          cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
-        src += L;
+    int decompress_block(short *src, short *dst, int x, int y, int NX, int NY, int Y, short **last_avg) {
         int SCALE = *src++;
         int length = *(int*)src;
-        src += 2;;
+        src += 2;
 
         struct Bits r(src);
         REP(x1, NX) {
@@ -739,15 +783,31 @@ public:
         }
         r.rollback();
         src = r.p;
-
+      
+        short avg[L];
         static struct ArCoder *coder = NULL;
         if (coder == NULL) {
             coder = new ArCoder;
-//            coder->load(r);
         }
-  //      coder->train();
-        
-        coder->init_decode(src);
+        if (*last_avg == NULL) {
+            *last_avg = new short[L];
+            REP(i, L) avg[i] = src[i];
+            src += L;
+            coder->init_decode(src);
+        } else {
+            coder->init_decode(src);
+            int header = coder->get_bits(4);
+            REP(i, L) coder->decode(avg+i, 1);
+            avg[0] <<= 4;
+            avg[0] += header;
+            //FOR(i, 2, L) avg[i] += avg[i-1];
+            FOR(i, 1, L) avg[i] += avg[i-1];
+            REP(i, L) avg[i] += (*last_avg)[i];
+        }
+    //          cout << endl;REP(i, L) cout << avg[i] << " "; cout << endl;
+        REP(i, L) (*last_avg)[i] = avg[i];
+
+
         short tmp[60];
         REP(x1, NX) {
             short *buf = dst + ((x*NX+x1)*Y+y*NY)*L;
