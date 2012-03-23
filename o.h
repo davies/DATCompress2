@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <queue>
 #include <assert.h>
+#include <math.h>
 
 //#define assert(x) 
 
@@ -121,122 +122,81 @@ struct Bits {
         }
     }
 };
-    
-inline int bitCount(int x) {
-    int b=0;
-    while (x > 0) {
-        b++;
-        x >>= 1;
-    }
-    return b;
-}
-
-inline int encodeSize(int x) {
-    if (x < 8) return x;
-    int bc = bitCount(x);
-    return -8 + (bc <<2) + ((x >> (bc-3)) & 3);
-}
-
-inline int decodeSize(int x) {
-    if (x<8) return x;
-    int bc = (x >>2) + 2;
-    int v = (4 + (x & 3) ) << (bc -3);
-//        if (bc >= 5) v += 1 << (bc-5);
-    return v;
-}
-
 
 const unsigned int MinLength = 0x01000000U;   // threshold for renormalization
 const unsigned int MaxLength = 0xFFFFFFFFU;      // maximum AC interval length
 const unsigned int LengthShift = 15;     // length bits discarded before mult.
 const unsigned int MaxCount    = 1 << LengthShift;  // for adaptive model2
-const int LOOKUP_LIMIT = 16;
+const unsigned int LOOKUP_LIMIT = 16;
 
 struct Model {
-    unsigned int *distribution, *symbol_count, *decoder_table;
-    unsigned total_count, update_cycle, symbols_until_update;
-    unsigned data_symbols, last_symbol, table_size, table_shift;
-    Model():distribution(NULL), symbol_count(NULL), decoder_table(NULL),
-            total_count(0),update_cycle(0), symbols_until_update(0), 
-            data_symbols(0),last_symbol(0), table_size(0), table_shift(0) {}
+    unsigned int *distribution, *count, *dtable;
+    unsigned total_count, update_cycle, update_left;
+    unsigned ns, last_symbol, table_size, table_shift;
+    Model():distribution(NULL), count(NULL), dtable(NULL),
+            total_count(0),update_cycle(0), update_left(0), 
+            ns(0),last_symbol(0), table_size(0), table_shift(0) {}
    
-    void set_alphabet(int size) {
-        set_distribution(NULL, size);
-    }
- 
-    void set_distribution(double *probability, unsigned int size) {
+    void init(unsigned int size) {
         last_symbol = size - 1;
-        data_symbols = size;
-        if (data_symbols > LOOKUP_LIMIT) {
+        ns = size;
+        if (ns > LOOKUP_LIMIT) {
             int table_bits = 3;
-            while (data_symbols > (1U << (table_bits + 2))) ++table_bits;
+            while (ns > (1U << (table_bits + 2))) ++table_bits;
             table_size  = (1 << table_bits) + 4;
             table_shift = LengthShift - table_bits;
-            distribution = new unsigned[data_symbols*2 + table_size+6];
-            decoder_table = distribution + data_symbols * 2; 
+            distribution = new unsigned[ns*2 + table_size+6];
+            dtable = distribution + ns * 2; 
         } else {
-            decoder_table = NULL;
+            dtable = NULL;
             table_size = table_shift = 0;
-            distribution = new unsigned[data_symbols*2];
+            distribution = new unsigned[ns*2];
         }
-        symbol_count = distribution + data_symbols;
-
-     /* unsigned s = 0;
-      double sum = 0.0, p = 1.0 / double(data_symbols);
-
-      for (unsigned k = 0; k < data_symbols; k++) {
-        if (probability) p = probability[k];
-//        if ((p < 0.0001) || (p > 0.9999)) AC_Error("invalid symbol probability");
-        distribution[k] = unsigned(sum * (1 << LengthShift));
-        sum += p;
-        if (table_size == 0) continue;
-        unsigned w = distribution[k] >> table_shift;
-        while (s < w) decoder_table[++s] = k - 1;
-      }
-
-      if (table_size != 0) {
-        decoder_table[0] = 0;
-        while (s <= table_size) decoder_table[++s] = data_symbols - 1;
-      }*/
+        count = distribution + ns;
 
         total_count = 0;
-        update_cycle = data_symbols;
-        for (unsigned k = 0; k < data_symbols; k++) symbol_count[k] = 1;
+        update_cycle = ns;
+        for (unsigned k = 0; k < ns; k++) count[k] = 1;
         update(false);
-        symbols_until_update = update_cycle = (data_symbols + 6) >> 1;
+        update_left = update_cycle = (ns + 6) >> 1;
+    }
+
+    inline void learn(int symbol, bool enc) {
+        count[symbol]+=128;
+        if (--update_left == 0) update(enc);
     }
 
     void update(bool enc) {
-        //      cout << "update " << total_count << endl;
-        if ((total_count += update_cycle) > MaxCount) {
+        if ((total_count += update_cycle*128) > MaxCount) {
             total_count = 0;
-            for (unsigned n = 0; n < data_symbols; n++)
-                total_count += (symbol_count[n] = (symbol_count[n] + 1) >> 1);
+            REP(n, ns) 
+                total_count += (count[n] = (count[n] + 1) >> 1);
         }
-        // compute cumulative distribution, decoder table
-        unsigned k, sum = 0, s = 0;
+        unsigned sum = 0, s = 0;
         unsigned scale = 0x80000000U / total_count;
 
-        if (enc || (table_size == 0))
-            for (k = 0; k < data_symbols; k++) {
+        if (enc || (table_size == 0)) {
+            REP(k, ns) {
                 distribution[k] = (scale * sum) >> (31 - LengthShift);
-                sum += symbol_count[k];
+                sum += count[k];
             }
-        else {
-            for (k = 0; k < data_symbols; k++) {
+        } else {
+            REP(k, ns) {
                 distribution[k] = (scale * sum) >> (31 - LengthShift);
-                sum += symbol_count[k];
+                sum += count[k];
                 unsigned w = distribution[k] >> table_shift;
-                while (s < w) decoder_table[++s] = k - 1;
+                while (s < w) dtable[++s] = k - 1;
             }
-            decoder_table[0] = 0;
-            while (s <= table_size) decoder_table[++s] = data_symbols - 1;
+            dtable[0] = 0;
+            while (s <= table_size) dtable[++s] = ns - 1;
         }
+
         // set frequency of model updates
+//        REP(i, ns) count[i] = (count[i]+1)/2;
         update_cycle = (5 * update_cycle) >> 2;
-        unsigned max_cycle = (data_symbols + 6) << 3;
+        unsigned max_cycle = (ns + 6) << 2;
         if (update_cycle > max_cycle) update_cycle = max_cycle;
-        symbols_until_update = update_cycle;
+        update_left = update_cycle;
     }
 };
 
@@ -255,9 +215,10 @@ struct ArCoder {
     Model model2[GROUPS];
 
     ArCoder() {
+        REP(i, MAX_L) model0[i].init(SYMBOL_COUNT);
+        REP(i, MAX_L*WIDTH) model1[i].init(SYMBOL_COUNT);
         REP(i, GROUPS) {
-//            model2[i].set_distribution(NULL, SYMBOL_COUNT);
-              model2[i].set_alphabet(SYMBOL_COUNT);
+              model2[i].init(SYMBOL_COUNT);
         }
     }
     
@@ -322,37 +283,56 @@ struct ArCoder {
 
         if (length < MinLength) renorm_enc_interval();        // renormalization
 
-        ++M.symbol_count[data];
-        if (--M.symbols_until_update == 0) M.update(true);  // periodic model update
-
+        M.learn(data, true);
     }
 
-    void encode_symbol(int idx, int v) {
+    inline int gen_code(int v) {
+        return v < -2 ? 0 : (v > 2 ? 4 : (v + 2));
+    }
+
+    inline int gen_index(int i, int code0, int code1) {
+        return i*25 + code0*5 + code1;
+    }
+
+    inline Model* choose(int i, int code0, int code1) {
+        int idx2 = gen_index(i, code0, code1);
+            return &model2[idx2];
+//        int idx1 = i*WIDTH + code1;
+//        if (model2[idx2].avg_length < 1) {
+////            cout << " 2 " ;
+//          return &model2[idx2];
+//      } else if (model1[idx1].avg_length < 1) {
+////            cout << " 1 " <<  model2[idx2].avg_length - model1[idx1].avg_length << endl;
+//          return &model1[idx1];
+//      } else {
+////            cout << " 0 " << model1[idx1].avg_length - model0[i].avg_length << endl;
+//            return &model0[i];
+//        }
+    }
+    
+    void encode_symbol(int i, int code0, int code1, int v) {
+        encode_byte(v, *choose(i, code0, code1));
+    }
+    
+    void encode_one(int i, int code0, int code1, int v) {
         while (abs(v) >= MAX_NUMBER) {
-            encode_byte(0, model2[idx]);
+            encode_symbol(i, code0, code1, 0);
             put_bits(v & 0xf, 4);
             v >>= 4;
         }
-        encode_byte(v + MAX_NUMBER, model2[idx]);
+        encode_symbol(i, code0, code1, v + MAX_NUMBER);
     }
-    
+
     void encode(short *src, int size) {
         int code0=0, code1 = 0;
         for(int i=0; i<size-1; i+=2) {
-            int idx = i*25 + code0*5 + code1;
-            int v = src[i];
-            encode_symbol(idx, v);
-            code0 = v < -2 ? 0 : (v > 2 ? 4 : (v + 2));
-            
-            idx = (i+1)*25 + code1*5 + code0;
-            v = src[i+1];
-            encode_symbol(idx, v);
-            code1 = v < -2 ? 0 : (v > 2 ? 4 : (v + 2));
+            encode_one(i, code0, code1, src[i]);
+            code0 = gen_code(src[i]);
+            encode_one(i+1, code1, code0, src[i+1]);
+            code1 = gen_code(src[i+1]);
         }
         if (size%2) {
-            int idx = (size-1)*25 + code0*5 + code1;
-            int v = src[size-1];
-            encode_symbol(idx, v);
+            encode_one(size-1, code0, code1, src[size-1]);
         }
 //        cout << "encode " ; REP(i, size) cout << src[i] << " "; cout << endl;
     }
@@ -389,13 +369,13 @@ struct ArCoder {
     int decode_byte(Model &M) {
         unsigned n, s, x, y = length;
 
-        if (M.decoder_table) {              // use table look-up for faster decoding
+        if (M.dtable) {              // use table look-up for faster decoding
 
             unsigned dv = value / (length >>= LengthShift);
             unsigned t = dv >> M.table_shift;
 
-            s = M.decoder_table[t];         // initial decision based on table look-up
-            n = M.decoder_table[t+1] + 1;
+            s = M.dtable[t];         // initial decision based on table look-up
+            n = M.dtable[t+1] + 1;
 
             while (n > s + 1) {                        // finish with bisection search
                 unsigned m = (s + n) >> 1;
@@ -410,7 +390,7 @@ struct ArCoder {
 
             x = s = 0;
             length >>= LengthShift;
-            unsigned m = (n = M.data_symbols) >> 1;
+            unsigned m = (n = M.ns) >> 1;
             // decode via bisection search
             do {
                 unsigned z = length * M.distribution[m];
@@ -429,22 +409,26 @@ struct ArCoder {
         length = y - x;
 
         if (length < MinLength) renorm_dec_interval();        // renormalization
-
-        ++M.symbol_count[s];
-        if (--M.symbols_until_update == 0) M.update(false);  // periodic model update
-
+        
+        M.learn(s, false);
         return s;
     }
+        
+    int decode_symbol(int i, int code0, int code1) {        
+        int r = decode_byte(*choose(i, code0, code1));
+        return r - MAX_NUMBER;
+    }
 
-
-    int decode_symbol(int idx) {
-        int r = decode_byte(model2[idx]) - MAX_NUMBER;
-        if (r != -MAX_NUMBER) return r;
+    int decode_one(int i, int code0, int code1) {
+        int r = decode_symbol(i, code0, code1);
+        if (r != -MAX_NUMBER) {
+            return r;
+        }
         int v = 0, c = 0;
         do {
             v |= get_bits(4) << c;
             c += 4;
-            r = decode_byte(model2[idx]) - MAX_NUMBER;
+            r = decode_symbol(i, code0, code1);
         } while (r == -MAX_NUMBER);
         v += r << c; 
         return v;
@@ -453,19 +437,13 @@ struct ArCoder {
     void decode(short *dst, int size) {
         int code0=0, code1 = 0;
         for(int i=0; i<size-1; i+=2) {
-            int idx = i*25 + code0*5 + code1;
-            int v = decode_symbol(idx);
-            dst[i] = v; 
-            code0 = v < -2 ? 0 : (v > 2 ? 4 : (v + 2));
-            
-            idx = (i+1)*25 + code1*5 + code0;
-            v = decode_symbol(idx);
-            dst[i+1] = v; 
-            code1 = v < -2 ? 0 : (v > 2 ? 4 : (v + 2));
+            dst[i] = decode_one(i, code0, code1);
+            code0 = gen_code(dst[i]);
+            dst[i+1] = decode_one(i+1, code1, code0);
+            code1 = gen_code(dst[i+1]);
         }
         if (size % 2) {
-            int idx = (size-1)*25 + code0*5 + code1;
-            dst[size-1] = decode_symbol(idx);
+            dst[size-1] = decode_one(size-1, code0, code1);
         }
 //        cout << "decode " ; REP(i, size) cout << dst[i] << " "; cout  << endl;
     }
@@ -727,8 +705,8 @@ public:
 
         struct Bits bits(dst);
         REP(x, N) {
-            bits.write(best[x*L]&0x3f, 6);
-            best[x*L] >>= 6;
+            bits.write(best[x*L]&0xf, 4);
+            best[x*L] >>= 4;
         }
         bits.flush();
         dst = bits.p;
@@ -829,7 +807,7 @@ public:
         REP(x1, NX) {
             short *buf = dst + ((x*NX+x1)*Y+y*NY)*L;
             REP(y1, NY) {
-                buf[y1*L] = r.read(6);
+                buf[y1*L] = r.read(4);
             }
         }
         r.rollback();
@@ -848,7 +826,7 @@ public:
             short *buf = dst + ((x*NX+x1)*Y+y*NY)*L;
             REP(y1, NY) {
                 coder->decode(tmp, L);
-                tmp[0] <<= 6;
+                tmp[0] <<= 4;
                 tmp[0] += buf[0];
                 
                 int last = 0;
